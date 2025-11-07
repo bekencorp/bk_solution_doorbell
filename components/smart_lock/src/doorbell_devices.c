@@ -18,6 +18,7 @@
 #include "components/bk_video_pipeline/bk_video_pipeline.h"
 #include "components/bk_display.h"
 #include "driver/pwr_clk.h"
+#include "driver/flash.h"
 #if CONFIG_BLUETOOTH_AP
 #include "components/bluetooth/bk_dm_bluetooth.h"
 #endif
@@ -195,6 +196,25 @@ int doorbell_get_lcd_status(int opcode, db_channel_t *channel, doorbell_transmis
     return 0;
 }
 
+static void doorbell_send_flash_op_state_callback(uint32_t state)
+{
+    db_device_info_t *info = db_device_info;
+
+    if (info == NULL || info->handle == NULL)
+    {
+        return;
+    }
+
+    if (state)
+    {
+        bk_camera_suspend(info->handle);
+    }
+    else
+    {
+        bk_camera_resume(info->handle);
+    }
+}
+
 int doorbell_camera_turn_on(camera_parameters_t *parameters)
 {
     bk_err_t ret = BK_FAIL;
@@ -234,6 +254,8 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
         return ret;
     }
 
+    mb_flash_register_op_camera_notify(doorbell_send_flash_op_state_callback);
+
     LOGD("%s success\n", __func__);
 
     return ret;
@@ -256,6 +278,8 @@ int doorbell_camera_turn_off(void)
         LOGW("%s fail\n", __func__);
         return ret;
     }
+
+    mb_flash_unregister_op_camera_notify();
 
     info->handle = NULL;
 
