@@ -33,7 +33,7 @@ Armino doorbell解决方案基于Armino SMP架构, 帮助用户开发应用;
 版本编译方法如下::
 
     cd ~/armino/bk_solution_doorbell
-    cd ~/projects/doorbell
+    cd projects/doorbell
     make clean SDK_DIR=~/armino/bk_avdk_smp
     make bk7258 SDK_DIR=~/armino/bk_avdk_smp
 
@@ -43,9 +43,31 @@ Armino doorbell解决方案基于Armino SMP架构, 帮助用户开发应用;
 版本编译方法如下::
 
     cd ~/armino/bk_solution_doorbell
-    cd ~/projects/doorviewer
+    cd projects/doorviewer
     make clean SDK_DIR=~/armino/bk_avdk_smp
     make bk7258 SDK_DIR=~/armino/bk_avdk_smp
+
+或者可以通过export来指定SDK路径::
+
+    cd ~/armino/bk_solution_doorbell
+    cd projects/doorviewer
+    export SDK_DIR=~/armino/bk_avdk_smp
+    make clean
+    make bk7258
+
+使用docker编译方式如下
+
+    linux或macos系统下在终端执行以下命令::
+
+        export SDK_DIR=~/armino/bk_avdk_smp
+        ./dbuild.sh make clean
+        ./dbuild.sh make bk7258
+
+    Windows下使用powershell执行以下命令::
+
+        $env:SDK_DIR = "C:\armino\bk_avdk_smp"
+        ./dbuild.ps1 make clean
+        ./dbuild.ps1 make bk7258
 
 本文档基于Armino SMP架构, 帮助用户开发应用;
 
