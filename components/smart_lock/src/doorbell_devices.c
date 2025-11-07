@@ -372,12 +372,6 @@ int doorbell_display_turn_on(display_parameters_t *parameters)
         return EVT_STATUS_ERROR;
     }
 
-    if (device == NULL)
-    {
-        //device = &lcd_device_custom_st7701sn;  // custom lcd device
-        device = &lcd_device_custom_st7796s;
-        LOGD("%s, lcd device use custom: %s\n", __func__, device->name);
-    }
     doorbell_lcd_ldo_open(LCD_LDO_GPIO);
     if (device->type == LCD_TYPE_RGB)
     {
