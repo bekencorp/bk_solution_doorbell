@@ -1,3 +1,6 @@
+$env:BK_SOLUTION_MODE = 1
+$env:SOLUTION_DIR = [System.IO.Path]::GetFullPath("..\..")
+
 function Check-SdkDir {
     param (
         [string]$SdkDir
@@ -19,15 +22,7 @@ function Main {
     $currentDir = (Get-Location).Path
     $currentDir = [System.IO.Path]::GetFullPath($currentDir)
     
-    if ([string]::IsNullOrEmpty($env:SOLUTION_DIR)) {
-        Write-Host "solution directory not found, please set SOLUTION_DIR environment variable" -ForegroundColor Red
-        exit 1
-    }
-    
-    $solutionDir = [System.IO.Path]::GetFullPath($env:SOLUTION_DIR)
     $projectDir = $currentDir.Replace($solutionDir + "\", "").Replace("\", "/")
-    
-    $env:SOLUTION_DIR = $solutionDir
     $env:PROJECT_DIR = $projectDir
     $dockerBuildScript = Join-Path -Path $env:SDK_DIR -ChildPath "dbuild.ps1"
     
@@ -35,8 +30,6 @@ function Main {
     
     & $dockerBuildScript "$args"
 }
-
-$env:BK_SOLUTION_MODE = 1
 
 Main "$args"
 
