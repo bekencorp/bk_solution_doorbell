@@ -39,8 +39,8 @@ typedef struct
 
 typedef struct
 {
-	ble_boarding_info_t boarding_info;
-	uint16_t channel;
+    ble_boarding_info_t boarding_info;
+    uint16_t channel;
 } doorbell_boarding_info_t;
 
 

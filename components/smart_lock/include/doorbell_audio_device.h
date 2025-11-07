@@ -32,13 +32,13 @@ typedef enum
  */
 typedef struct
 {
-	uint8_t aec;
-	uint8_t uac;
-	uint8_t rmt_recoder_fmt; /* codec_format_t */
-	uint8_t rmt_player_fmt; /* codec_format_t */
-	uint32_t rmt_recorder_sample_rate;
-	uint32_t rmt_player_sample_rate;
-	uint8_t asr;
+    uint8_t aec;
+    uint8_t uac;
+    uint8_t rmt_recoder_fmt; /* codec_format_t */
+    uint8_t rmt_player_fmt; /* codec_format_t */
+    uint32_t rmt_recorder_sample_rate;
+    uint32_t rmt_player_sample_rate;
+    uint8_t asr;
 } audio_parameters_t;
 
 /**
@@ -46,7 +46,7 @@ typedef struct
  */
 typedef enum
 {
-	AA_UNKNOWN = 0,
+    AA_UNKNOWN = 0,
     AA_ECHO_DEPTH = 1,
     AA_MAX_AMPLITUDE = 2,
     AA_MIN_AMPLITUDE = 3,
@@ -59,14 +59,14 @@ typedef enum
  */
 typedef struct
 {
-	uint8_t audio_enable;
-	const media_transfer_cb_t *audio_transfer_cb;
+    uint8_t audio_enable;
+    const media_transfer_cb_t *audio_transfer_cb;
     voice_handle_t voice_handle;
     voice_read_handle_t voice_read_handle;
     voice_write_handle_t voice_write_handle;
 #if (CONFIG_ASR_SERVICE)
-	asr_handle_t asr_handle;
-	aud_asr_handle_t aud_asr_handle;
+    asr_handle_t asr_handle;
+    aud_asr_handle_t aud_asr_handle;
 #endif
 } db_audio_device_info_t;
 
@@ -115,7 +115,7 @@ int doorbell_audio_turn_off(void);
 int doorbell_audio_acoustics(uint32_t index, uint32_t param);
 
 /**
- * @brief      Audio data callback function 
+ * @brief      Audio data callback function
  *             This function is called when audio data is received
  *
  * @param[in]      data    Audio data pointer

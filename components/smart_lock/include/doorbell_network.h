@@ -4,10 +4,10 @@
 #include "lwip/sockets.h"
 #include "net.h"
 
-#define IP_QOS_PRIORITY_HIGHEST			(0xD0)
-#define IP_QOS_PRIORITY_HIGH			(0xA0)
-#define IP_QOS_PRIORITY_LOW				(0x20)
-#define IP_QOS_PRIORITY_LOWEST			(0x00)
+#define IP_QOS_PRIORITY_HIGHEST         (0xD0)
+#define IP_QOS_PRIORITY_HIGH            (0xA0)
+#define IP_QOS_PRIORITY_LOW             (0x20)
+#define IP_QOS_PRIORITY_LOWEST          (0x00)
 
 #define DOORBELL_SEND_MAX_RETRY (2000)
 #define DOORBELL_SEND_MAX_DELAY (10)

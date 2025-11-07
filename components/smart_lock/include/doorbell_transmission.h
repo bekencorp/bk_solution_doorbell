@@ -13,14 +13,14 @@
 */
 typedef struct
 {
-	uint16_t magic;
-	uint16_t flags;
-	uint32_t timestamp;
-	uint16_t sequence;
-	uint16_t length;
-	uint8_t crc;
-	uint8_t reserved[3];
-	uint8_t  payload[];
+    uint16_t magic;
+    uint16_t flags;
+    uint32_t timestamp;
+    uint16_t sequence;
+    uint16_t length;
+    uint8_t crc;
+    uint8_t reserved[3];
+    uint8_t  payload[];
 } __attribute__((__packed__)) db_trans_head_t;
 
 #define HEAD_SIZE_TOTAL             (sizeof(db_trans_head_t))
@@ -34,19 +34,19 @@ typedef int (*doorbell_transmission_send_t)(uint8_t *data, uint16_t length);
 
 typedef struct
 {
-	doorbell_transmission_send_t tsend;
+    doorbell_transmission_send_t tsend;
 } db_channel_cb_t;
 
 
 typedef struct
 {
-	uint8_t *cbuf;
-	uint16_t csize;
-	uint16_t ccount;
-	uint16_t sequence;
-	db_trans_head_t *tbuf;
-	const db_channel_cb_t *cb;
-	uint16_t tsize;
+    uint8_t *cbuf;
+    uint16_t csize;
+    uint16_t ccount;
+    uint16_t sequence;
+    db_trans_head_t *tbuf;
+    const db_channel_cb_t *cb;
+    uint16_t tsize;
 } db_channel_t;
 
 

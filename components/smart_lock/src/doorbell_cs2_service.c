@@ -20,8 +20,8 @@
 #include "doorbell_devices.h"
 #include "doorbell_audio_device.h"
 #include "doorbell_cmd.h"
-#include "doorbell_frame_que.h"
-#include "doorbell_video_device.h"
+#include "frame/frame_que_v2.h"
+#include "frame_buffer.h"
 
 #define TAG "db-cs2"
 
@@ -585,14 +585,28 @@ int doorbell_cs2_aud_get_tx_size(void)
     return doorbell_cs2_info->aud_channel->tsize - sizeof(db_trans_head_t);
 }
 
+// V2版本：包装函数适配CS2图传接口
+static frame_buffer_t *cs2_transmission_read_frame(image_format_t format, uint32_t timeout)
+{
+    // CS2传输是消费者，使用CONSUMER_TRANSMISSION ID
+    // 标记为慢速消费者（受网络影响）
+    return frame_queue_v2_get_frame(format, CONSUMER_TRANSMISSION, timeout);
+}
+
+static void cs2_transmission_free_frame(image_format_t format, frame_buffer_t *frame)
+{
+    // CS2传输释放帧
+    frame_queue_v2_release_frame(format, CONSUMER_TRANSMISSION, frame);
+}
+
 static media_transfer_cb_t doorbell_cs2_img_channel =
 {
     .send = doorbell_cs2_img_send_packet,
     .prepare = doorbell_cs2_img_send_prepare,
     .get_tx_buf = doorbell_cs2_img_get_tx_buf,
     .get_tx_size = doorbell_cs2_img_get_tx_size,
-    .read = frame_queue_get_frame,
-    .free = frame_queue_free,
+    .read = cs2_transmission_read_frame,
+    .free = cs2_transmission_free_frame,
 #if CONFIG_MEDIA_DROP_STRATEGY_ENABLE
     .drop_check = doorbell_cs2_img_drop_check,
 #else

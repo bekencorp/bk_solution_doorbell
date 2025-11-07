@@ -13,7 +13,6 @@
 #include "doorbell_cmd.h"
 #include "doorbell_devices.h"
 #include "doorbell_audio_device.h"
-#include "doorbell_video_device.h"
 #include "doorbell_network.h"
 #include "doorbell_cs2_service.h"
 #include "doorbell_udp_service.h"

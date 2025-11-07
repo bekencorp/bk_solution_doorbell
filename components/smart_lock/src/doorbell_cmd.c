@@ -21,7 +21,6 @@
 #include "doorbell_devices.h"
 #include "doorbell_audio_device.h"
 #include "doorbell_cmd.h"
-#include "doorbell_video_device.h"
 
 #define TAG "db-cmd"
 

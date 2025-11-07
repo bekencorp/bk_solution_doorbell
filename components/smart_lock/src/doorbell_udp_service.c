@@ -21,8 +21,8 @@
 #include "doorbell_transmission.h"
 #include "doorbell_devices.h"
 #include "doorbell_audio_device.h"
-#include "doorbell_frame_que.h"
-#include "doorbell_video_device.h"
+#include "frame/frame_que_v2.h"
+#include "frame_buffer.h"
 
 #define TAG "doorbell-UDP"
 
@@ -171,14 +171,28 @@ int doorbell_udp_aud_get_tx_size(void)
     return db_udp_service->aud_channel->tsize - sizeof(db_trans_head_t);
 }
 
+// V2版本：包装函数适配UDP图传接口
+static frame_buffer_t *udp_transmission_read_frame(image_format_t format, uint32_t timeout)
+{
+    // UDP传输是消费者，使用CONSUMER_TRANSMISSION ID
+    // 标记为慢速消费者（受网络影响）
+    return frame_queue_v2_get_frame(format, CONSUMER_TRANSMISSION, timeout);
+}
+
+static void udp_transmission_free_frame(image_format_t format, frame_buffer_t *frame)
+{
+    // UDP传输释放帧
+    frame_queue_v2_release_frame(format, CONSUMER_TRANSMISSION, frame);
+}
+
 static media_transfer_cb_t doorbell_udp_img_channel =
 {
     .send = doorbell_udp_img_send_packet,
     .prepare = doorbell_udp_img_send_prepare,
     .get_tx_buf = doorbell_udp_img_get_tx_buf,
     .get_tx_size = doorbell_udp_img_get_tx_size,
-    .read = frame_queue_get_frame,
-    .free = frame_queue_free,
+    .read = udp_transmission_read_frame,
+    .free = udp_transmission_free_frame,
 };
 
 static const media_transfer_cb_t doorbell_udp_aud_channel =

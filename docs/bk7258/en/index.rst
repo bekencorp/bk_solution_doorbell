@@ -1,16 +1,12 @@
-Beken Armino Armino doorbell Solution Development Document
-=============================================================
+Beken Armino Doorbell Solution
+=====================================
 
 :link_to_translation:`zh_CN:[中文]`
 
-Armino doorbell Solution
-------------------------------------
-
-
 This is the official documentation for Beken Armino doorbell solution.
 
-The Armino doorbell solution is based on the Armino SMP architecture to help users develop applications.
-The code download and version compilation methods are as follows:
+Armino doorbell solution is based on Armino SMP architecture to help users develop applications.
+Code download and version compilation methods are as follows:
 
 1. Armino SDK Code Download
 ------------------------------------
@@ -37,14 +33,23 @@ You can download the Armino doorbell solution code from gitlab::
 The version compilation method is as follows::
 
     cd ~/armino/bk_solution_doorbell
-    cd ~/projects/app
+    cd ~/projects/doorbell
     make clean SDK_DIR=~/armino/bk_avdk_smp
     make bk7258 SDK_DIR=~/armino/bk_avdk_smp
 
+4. Armino Doorviewer Solution Version Compilation
+------------------------------------------------------
 
-This document is based on the Armino SMP architecture to help users develop applications.
+The version compilation method is as follows::
 
-For the Armino SMP architecture, please refer to `Armino SMP Architecture <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7258/zh_CN/v3.0.1/index.html>`_
+    cd ~/armino/bk_solution_doorbell
+    cd ~/projects/doorviewer
+    make clean SDK_DIR=~/armino/bk_avdk_smp
+    make bk7258 SDK_DIR=~/armino/bk_avdk_smp
+
+This documentation is based on Armino SMP architecture to help users develop applications.
+
+For Armino SMP architecture, please refer to `Armino SMP Architecture <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7258/zh_CN/v3.0.1/index.html>`_
 
 For Application Processor (AP) configuration and usage, please refer to `Armino AP <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/ap_doc/bk7258/zh_CN/v3.0.1/index.html>`_
 

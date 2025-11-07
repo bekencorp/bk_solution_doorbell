@@ -24,19 +24,19 @@
 
 typedef struct
 {
-	uint32_t  opcode;
-	uint32_t  param;
-	uint16_t  length;
-	uint8_t  payload[];
+    uint32_t  opcode;
+    uint32_t  param;
+    uint16_t  length;
+    uint8_t  payload[];
 } __attribute__((__packed__)) db_cmd_head_t;
 
 typedef struct
 {
-	uint32_t  opcode;
-	uint8_t  status;
-	uint16_t  flags;
-	uint16_t  length;
-	uint8_t  payload[];
+    uint32_t  opcode;
+    uint8_t  status;
+    uint16_t  flags;
+    uint16_t  length;
+    uint8_t  payload[];
 } __attribute__((__packed__)) db_evt_head_t;
 
 
