@@ -545,6 +545,11 @@ bk_err_t doorbell_devices_stop(void)
         rtos_delete_thread(s_db_trans_cfg->transfer_thread);
         s_db_trans_cfg->transfer_thread = NULL;
     }
+    if (s_db_trans_cfg->sem)
+    {
+        rtos_deinit_semaphore(&s_db_trans_cfg->sem);
+        s_db_trans_cfg->sem = NULL;
+    }
     os_free(s_db_trans_cfg);
 	s_db_trans_cfg = NULL;
 
