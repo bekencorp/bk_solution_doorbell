@@ -1,45 +1,7 @@
 #ifndef __DOORBELL_COMM_H__
 #define __DOORBELL_COMM_H__
 
-#define UDP_SDP_LOCAL_PORT              (10000)
-#define UDP_SDP_REMOTE_PORT             (52110)
-
-#define DOORBELL_CMD_PORT               (7100)
-
-#define DOORBELL_UDP_IMG_PORT           (7180)
-#define DOORBELL_UDP_AUD_PORT           (7170)
-
-#define DOORBELL_TCP_IMG_PORT           (7150)
-#define DOORBELL_TCP_AUD_PORT           (7140)
-
-#define DOORBELL_UDP_NETWORK_MAX_SIZE   (1472)
-#define DOORBELL_TCP_NETWORK_MAX_SIZE   (1460)
-#define DOORBELL_NETWORK_MAX_SIZE       (1024)
-
 #define UVC_DEVICE_ID (0xFDF6)
-#define TRANSMISSION_BIG_ENDIAN (BK_FALSE)
-
-
-#if TRANSMISSION_BIG_ENDIAN == BK_TRUE
-#define CHECK_ENDIAN_UINT32(var)    htonl(var)
-#define CHECK_ENDIAN_UINT16(var)    htons(var)
-
-#define STREAM_TO_UINT16(u16, p) {u16 = (((uint16_t)(*((p) + 1))) + (((uint16_t)(*((p)))) << 8)); (p) += 2;}
-#define STREAM_TO_UINT32(u32, p) {u32 = ((((uint32_t)(*((p) + 3)))) + ((((uint32_t)(*((p) + 2)))) << 8) + ((((uint32_t)(*((p) + 1)))) << 16) + ((((uint32_t)(*((p))))) << 24)); (p) += 4;}
-
-
-#else
-#define CHECK_ENDIAN_UINT32
-#define CHECK_ENDIAN_UINT16
-
-#define STREAM_TO_UINT16(u16, p) {u16 = ((uint16_t)(*(p)) + (((uint16_t)(*((p) + 1))) << 8)); (p) += 2;}
-#define STREAM_TO_UINT32(u32, p) {u32 = (((uint32_t)(*(p))) + ((((uint32_t)(*((p) + 1)))) << 8) + ((((uint32_t)(*((p) + 2)))) << 16) + ((((uint32_t)(*((p) + 3)))) << 24)); (p) += 4;}
-
-
-#endif
-
-#define STREAM_TO_UINT8(u8, p) {u8 = (uint8_t)(*(p)); (p) += 1;}
-#define DEVICE_RESPONSE_SIZE (DOORBELL_NETWORK_MAX_SIZE - sizeof(db_evt_head_t))
 
 typedef enum
 {

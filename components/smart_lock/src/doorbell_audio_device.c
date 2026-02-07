@@ -4,10 +4,10 @@
 #include <os/os.h>
 
 #include "doorbell_comm.h"
-#include "doorbell_transmission.h"
+
 #include "doorbell_cmd.h"
 #include "doorbell_audio_device.h"
-#include "doorbell_cs2_service.h"
+
 
 #include <components/bk_voice_service.h>
 #include <components/bk_voice_service_types.h>
@@ -34,48 +34,17 @@ extern const doorbell_service_interface_t *doorbell_current_service;
 
 db_audio_device_info_t *gl_db_audio_device_info = NULL;
 
-int doorbell_devices_set_audio_transfer_callback(const void *cb)
-{
-    if (gl_db_audio_device_info == NULL)
-    {
-        LOGE("db_device_info null");
-        return  BK_FAIL;
-    }
-
-    gl_db_audio_device_info->audio_transfer_cb = (const media_transfer_cb_t *)cb;
-
-    return BK_OK;
-}
-
 
 int doorbell_voice_send_callback(unsigned char *data, unsigned int len, void *args)
 {
-    if (gl_db_audio_device_info == NULL)
+    audio_enc_type_t enc_type = 0;
+
+    if (args != NULL)
     {
-        LOGE("%s, db_device_info NULL\n", __func__);
-        return BK_FAIL;
+        enc_type = *(audio_enc_type_t *)args;
     }
-
-    if (gl_db_audio_device_info->audio_transfer_cb == NULL)
-    {
-        LOGE("%s, audio_transfer_cb NULL\n", __func__);
-        return BK_FAIL;
-    }
-
-    if (len > gl_db_audio_device_info->audio_transfer_cb->get_tx_size())
-    {
-        LOGE("%s, buffer over flow %d %d\n", __func__, len, gl_db_audio_device_info->audio_transfer_cb->get_tx_size());
-        return BK_FAIL;
-    }
-
-    uint8_t *buffer = gl_db_audio_device_info->audio_transfer_cb->get_tx_buf();
-
-    if (gl_db_audio_device_info->audio_transfer_cb->prepare)
-    {
-        gl_db_audio_device_info->audio_transfer_cb->prepare(data, len);
-    }
-
-    return gl_db_audio_device_info->audio_transfer_cb->send(buffer, len);
+    
+    return ntwk_trans_audio_send(data, len, enc_type);
 }
 
 int doorbell_audio_turn_off(void)

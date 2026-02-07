@@ -5,8 +5,7 @@
 #include <components/bk_voice_read_service_types.h>
 #include <components/bk_voice_write_service_types.h>
 
-#include "doorbell_transmission.h"
-#include "wifi_transfer.h"
+#include "network_transfer.h"
 
 #if (CONFIG_ASR_SERVICE)
 #include <components/bk_asr_service_types.h>
@@ -60,7 +59,6 @@ typedef enum
 typedef struct
 {
     uint8_t audio_enable;
-    const media_transfer_cb_t *audio_transfer_cb;
     voice_handle_t voice_handle;
     voice_read_handle_t voice_read_handle;
     voice_write_handle_t voice_write_handle;
@@ -70,17 +68,6 @@ typedef struct
 #endif
 } db_audio_device_info_t;
 
-
-/**
- * @brief      Set audio transfer callback function
- *
- * @param[in]      cb  Audio transfer callback function pointer
- *
- * @return         Result
- *                 - BK_OK: success
- *                 - other: failed
- */
-int doorbell_devices_set_audio_transfer_callback(const void *cb);
 
 /**
  * @brief      Turn on audio device

@@ -1,8 +1,8 @@
 #ifndef __DOORBELL_CMD_H__
 #define __DOORBELL_CMD_H__
 
-#include "doorbell_transmission.h"
 #include "lwip/inet.h"
+#include "network_transfer.h"
 
 #define EVT_STATUS_OK               (0)
 #define EVT_STATUS_ERROR            (1)
@@ -39,12 +39,8 @@ typedef struct
     uint8_t  payload[];
 } __attribute__((__packed__)) db_evt_head_t;
 
+#define DEVICE_RESPONSE_SIZE (NTWK_TRANS_DATA_MAX_SIZE - sizeof(db_evt_head_t))
 
-
-void doorbell_command_handle(uint8_t sub_channel, uint8_t *data, uint16_t length);
-void doorbell_cmd_server_init(void);
-void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t sequence, uint16_t flags, uint32_t timestamp, uint8_t sequences, uint8_t *data, uint16_t length);
-
-in_addr_t doorbell_cmd_get_socket_address(void);
+void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length);
 
 #endif

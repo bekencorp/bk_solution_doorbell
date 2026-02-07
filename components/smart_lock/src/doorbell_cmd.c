@@ -17,10 +17,12 @@
 
 #include "doorbell_comm.h"
 #include "doorbell_network.h"
-#include "doorbell_transmission.h"
+
 #include "doorbell_devices.h"
 #include "doorbell_audio_device.h"
 #include "doorbell_cmd.h"
+
+#include "network_transfer.h"
 
 #define TAG "db-cmd"
 
@@ -66,17 +68,8 @@ typedef enum
     DBNOTIFY_HEARTBEAT = 1 | (DOORBELL_NOTIFY_FLAGS),
 } dbnotify_t;
 
-
-
 typedef struct
 {
-    uint32_t server_state : 1;
-    struct sockaddr_in socket;
-    beken_thread_t thread;
-    int server_fd;
-    int client_fd;
-    db_channel_t *db_channel;
-    beken_mutex_t tx_lock;
     beken_timer_t timer;
     uint32_t intval_ms;
     in_addr_t remote_address;
@@ -85,36 +78,8 @@ typedef struct
 
 db_cmd_info_t *db_cmd_info = NULL;
 
-int doorbell_transmission_send(uint8_t *data, uint16_t length)
-{
-    int ret = 0;
 
-    if (db_cmd_info->server_state == BK_FALSE)
-    {
-        LOGE("%s server not ready\n", __func__);
-        return -1;
-    }
-
-    if (db_cmd_info->client_fd < 0)
-    {
-        LOGE("%s client not ready\n", __func__);
-        return -1;
-    }
-
-    rtos_lock_mutex(&db_cmd_info->tx_lock);
-    ret = doorbell_socket_write(&db_cmd_info->client_fd, data, length, 0);
-    rtos_unlock_mutex(&db_cmd_info->tx_lock);
-
-    return ret;
-}
-
-
-static const db_channel_cb_t db_channel_callback =
-{
-    .tsend = doorbell_transmission_send,
-};
-
-void doorbell_transmission_event_report(db_channel_t *channel, uint32_t opcode, uint8_t status, uint16_t flags)
+void doorbell_transmission_event_report(uint32_t opcode, uint8_t status, uint16_t flags)
 {
     LOGD("%s, %d\n", __func__, opcode);
 
@@ -124,18 +89,12 @@ void doorbell_transmission_event_report(db_channel_t *channel, uint32_t opcode, 
     evt.length = CHECK_ENDIAN_UINT16(0);
     evt.flags = flags;
 
-    doorbell_transmission_pack_send(channel, (uint8_t *)&evt, sizeof(db_evt_head_t), doorbell_transmission_send);
+    ntwk_trans_ctrl_send((uint8_t *)&evt, sizeof(db_evt_head_t));
 }
 
 
 static void doorbell_keep_alive_timer_handler(void *data)
 {
-    if (db_cmd_info == NULL)
-    {
-        LOGE("db_cmd_info NULL return");
-        return;
-    }
-
     LOGD("doorbell_keep_alive_timer_handler\n");
 
     db_evt_head_t evt;
@@ -144,7 +103,7 @@ static void doorbell_keep_alive_timer_handler(void *data)
     evt.length = CHECK_ENDIAN_UINT16(0);
     evt.flags = EVT_FLAGS_COMPLETE;
 
-    doorbell_transmission_pack_send(db_cmd_info->db_channel, (uint8_t *)&evt, sizeof(db_evt_head_t), doorbell_transmission_send);
+    ntwk_trans_ctrl_send((uint8_t *)&evt, sizeof(db_evt_head_t));
 }
 
 int doorbell_keep_alive_start_timer(UINT32 time_ms)
@@ -218,8 +177,41 @@ int doorbell_keep_alive_stop_timer(void)
     return BK_FAIL;
 }
 
+bk_err_t doorbell_cmd_server_init(void)
+{
+    if (db_cmd_info != NULL)
+    {
+        LOGE("db_cmd_info already init\n");
+        return BK_FAIL;
+    }
 
-void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t sequence, uint16_t flags, uint32_t timestamp, uint8_t sequences, uint8_t *data, uint16_t length)
+    db_cmd_info = os_malloc(sizeof(db_cmd_info_t));
+
+    if (db_cmd_info == NULL)
+    {
+        LOGE("malloc db_cmd_info\n");
+        return BK_FAIL;
+    }
+
+    os_memset(db_cmd_info, 0, sizeof(db_cmd_info_t));
+    return BK_OK;
+}
+
+bk_err_t doorbell_cmd_server_deinit(void)
+{
+
+    if (db_cmd_info == NULL)
+    {
+        LOGE("db_cmd_info not init\n");
+        return BK_FAIL;
+    }
+
+    os_free(db_cmd_info);
+    db_cmd_info = NULL;
+    return BK_OK;
+}
+
+void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 {
     db_cmd_head_t cmd, *ptr = (db_cmd_head_t *)data;
     uint8_t *p = ptr->payload;
@@ -234,7 +226,7 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
     cmd.param = CHECK_ENDIAN_UINT32(ptr->param);
     cmd.length = CHECK_ENDIAN_UINT32(ptr->length);
 
-    LOGD("%s, opcode: %u, param: %u, length: %u, time: %u, sequence: %u\n", __func__, cmd.opcode, cmd.param, cmd.length, timestamp, sequences);
+    LOGD("%s, opcode: %u, param: %u, length: %u\n", __func__, cmd.opcode, cmd.param, cmd.length);
 
     switch (cmd.opcode)
     {
@@ -266,7 +258,7 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
                 LOGE("DBCMD_SET_SERVICE_TYPE error\n");
             }
 
-            doorbell_transmission_pack_send(channel, (uint8_t *)&evt, sizeof(db_evt_head_t), doorbell_transmission_send);
+            ntwk_trans_ctrl_send((uint8_t *)&evt, sizeof(db_evt_head_t));
         }
         break;
 
@@ -276,20 +268,22 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
 
             if (cmd.param)
             {
+                doorbell_cmd_server_init();
                 doorbell_keep_alive_start_timer(cmd.param);
             }
             else
             {
                 doorbell_keep_alive_stop_timer();
+                doorbell_cmd_server_deinit();
             }
 
-            doorbell_transmission_event_report(channel, cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
         }
         break;
 
         case DBCMD_GET_SUPPORTED_CAMERA_DEVICES:
         {
-            doorbell_get_supported_camera_devices(cmd.opcode, channel, doorbell_transmission_send);
+            doorbell_get_supported_camera_devices(cmd.opcode);
         }
         break;
 
@@ -328,7 +322,7 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
             int ret = doorbell_camera_turn_on(&parameters);
             doorbell_video_transfer_turn_on();
 
-            doorbell_transmission_event_report(channel, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
 
@@ -337,7 +331,7 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
             doorbell_video_transfer_turn_off();
             int ret = doorbell_camera_turn_off();
 
-            doorbell_transmission_event_report(channel, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
 
@@ -360,7 +354,7 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
 
             int ret = doorbell_audio_turn_on(&parameters);
 
-            doorbell_transmission_event_report(channel, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
 
@@ -370,7 +364,7 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
 
             int ret = doorbell_audio_turn_off();
 
-            doorbell_transmission_event_report(channel, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
 
@@ -389,7 +383,7 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
 
             int ret = doorbell_display_turn_on(&parameters);
 
-            doorbell_transmission_event_report(channel, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
 
@@ -397,25 +391,25 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
         {
             int ret = doorbell_display_turn_off();
 
-            doorbell_transmission_event_report(channel, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
 
         case DBCMD_GET_SUPPORTED_LCD_DEVICES:
         {
-            doorbell_get_supported_lcd_devices(cmd.opcode, channel, doorbell_transmission_send);
+            doorbell_get_supported_lcd_devices(cmd.opcode);
         }
         break;
 
         case DBCMD_GET_LCD_STATUS:
         {
-            doorbell_get_lcd_status(cmd.opcode, channel, doorbell_transmission_send);
+            doorbell_get_lcd_status(cmd.opcode);
         }
         break;
 
         case DBCMD_PNG:
         {
-            doorbell_transmission_event_report(channel, cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
         }
         break;
 
@@ -425,222 +419,15 @@ void doorbell_transmission_cmd_recive_callback(db_channel_t *channel, uint16_t s
             STREAM_TO_UINT32(param, p);
 
             int ret = doorbell_audio_acoustics(cmd.param, param);
-            doorbell_transmission_event_report(channel, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
 
         default:
         {
-            doorbell_transmission_event_report(channel, cmd.opcode, EVT_STATUS_UNKNOWN, EVT_FLAGS_COMPLETE);
+            doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_UNKNOWN, EVT_FLAGS_COMPLETE);
         }
         break;
-    }
-}
-
-static void doorbell_cmd_set_keepalive(int fd)
-{
-    int opt = 1, ret;
-    // open tcp keepalive
-    ret = setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(int));
-
-    opt = 30;  // 5 second
-    ret = setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &opt, sizeof(int));
-
-    opt = 1;  // 1s second for intval
-    ret = setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &opt, sizeof(int));
-
-    opt = 3;  // 3 times
-    ret = setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &opt, sizeof(int));
-    LOGV("%s %d\n", __func__, ret);
-}
-
-static void doorbell_cmd_server_thread(beken_thread_arg_t data)
-{
-    int rcv_len = 0;
-    //  struct sockaddr_in server;
-    bk_err_t ret = BK_OK;
-    u8 *rcv_buf = NULL;
-    fd_set watchfd;
-
-    LOGD("%s entry\n", __func__);
-    (void)(data);
-
-    rcv_buf = (u8 *) os_malloc((DOORBELL_NETWORK_MAX_SIZE + 1) * sizeof(u8));
-    if (!rcv_buf)
-    {
-        LOGE("tcp os_malloc failed\n");
-        goto out;
-    }
-
-    // for data transfer
-    db_cmd_info->server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (db_cmd_info->server_fd == -1)
-    {
-        LOGE("socket failed\n");
-        goto out;
-    }
-
-    db_cmd_info->socket.sin_family = AF_INET;
-    db_cmd_info->socket.sin_port = htons(DOORBELL_CMD_PORT);
-    db_cmd_info->socket.sin_addr.s_addr = inet_addr("0.0.0.0");
-
-    if (bind(db_cmd_info->server_fd, (struct sockaddr *)&db_cmd_info->socket, sizeof(struct sockaddr_in)) == -1)
-    {
-        LOGE("bind failed\n");
-        goto out;
-    }
-
-    if (listen(db_cmd_info->server_fd, 0) == -1)
-    {
-        LOGE("listen failed\n");
-        goto out;
-    }
-
-    LOGD("%s: start listen \n", __func__);
-
-    while (1)
-    {
-        FD_ZERO(&watchfd);
-        FD_SET(db_cmd_info->server_fd, &watchfd);
-
-        LOGD("waiting for a new connection\n");
-        ret = select(db_cmd_info->server_fd + 1, &watchfd, NULL, NULL, NULL);
-        if (ret <= 0)
-        {
-            LOGE("select ret:%d\n", ret);
-            continue;
-        }
-        else
-        {
-            // is new connection
-            if (FD_ISSET(db_cmd_info->server_fd, &watchfd))
-            {
-                struct sockaddr_in client_addr;
-                socklen_t cliaddr_len = 0;
-
-                cliaddr_len = sizeof(client_addr);
-
-                db_cmd_info->client_fd = accept(db_cmd_info->server_fd, (struct sockaddr *)&client_addr, &cliaddr_len);
-
-                if (db_cmd_info->client_fd < 0)
-                {
-                    LOGE("accept return fd:%d\n", db_cmd_info->client_fd);
-                    break;
-                }
-
-                uint8_t *src_ipaddr = (UINT8 *)&client_addr.sin_addr.s_addr;
-
-                LOGD("accept a new connection fd:%d, %d.%d.%d.%d\n", db_cmd_info->client_fd, src_ipaddr[0], src_ipaddr[1],
-                     src_ipaddr[2], src_ipaddr[3]);
-
-                db_cmd_info->remote_address = client_addr.sin_addr.s_addr;
-
-
-                doorbell_socket_set_qos(db_cmd_info->client_fd, IP_QOS_PRIORITY_HIGHEST);
-
-                if (db_cmd_info->server_state == BK_FALSE)
-                {
-                    doorbell_msg_t msg;
-
-                    db_cmd_info->server_state = BK_TRUE;
-
-                    msg.event = DBEVT_REMOTE_DEVICE_CONNECTED;
-                    msg.param = db_cmd_info->remote_address;
-                    doorbell_send_msg(&msg);
-                }
-
-
-                while (db_cmd_info->server_state == BK_TRUE)
-                {
-                    rcv_len = recv(db_cmd_info->client_fd, rcv_buf, DOORBELL_CMD_BUFFER, 0);
-                    if (rcv_len > 0)
-                    {
-                        //bk_net_send_data(rcv_buf, rcv_len, TVIDEO_SND_TCP);
-                        LOGD("%s, got length: %d\n", __func__, rcv_len);
-                        doorbell_transmission_unpack(db_cmd_info->db_channel, rcv_buf, rcv_len, doorbell_transmission_cmd_recive_callback);
-                    }
-                    else
-                    {
-                        // close this socket
-                        LOGD("%s, recv close fd:%d, rcv_len:%d, error:%d\n", __func__, db_cmd_info->client_fd, rcv_len, errno);
-                        close(db_cmd_info->client_fd);
-                        db_cmd_info->client_fd = -1;
-
-                        if (db_cmd_info->server_state == BK_TRUE)
-                        {
-                            doorbell_msg_t msg;
-
-                            db_cmd_info->server_state = BK_FALSE;
-
-                            msg.event = DBEVT_REMOTE_DEVICE_DISCONNECTED;
-                            msg.param = BK_OK;
-                            doorbell_send_msg(&msg);
-                        }
-                        break;
-                    }
-
-                }
-            }
-        }
-    }
-out:
-
-    LOGE("%s exit %d\n", __func__, db_cmd_info->server_state);
-
-    if (rcv_buf)
-    {
-        os_free(rcv_buf);
-        rcv_buf = NULL;
-    }
-
-    if (db_cmd_info->server_fd != -1)
-    {
-        close(db_cmd_info->server_fd);
-        db_cmd_info->server_fd = -1;
-    }
-
-    db_cmd_info->server_state = BK_FALSE;
-
-    db_cmd_info->thread = NULL;
-    rtos_delete_thread(NULL);
-}
-
-in_addr_t doorbell_cmd_get_socket_address(void)
-{
-    return db_cmd_info->remote_address;
-}
-
-void doorbell_cmd_server_init(void)
-{
-    bk_err_t ret;
-
-    db_cmd_info = os_malloc(sizeof(db_cmd_info_t));
-
-    if (db_cmd_info == NULL)
-    {
-        LOGE("malloc db_cmd_info\n");
-        return;
-    }
-
-    os_memset(db_cmd_info, 0, sizeof(db_cmd_info_t));
-
-    rtos_init_mutex(&db_cmd_info->tx_lock);
-
-    db_cmd_info->db_channel = doorbell_transmission_malloc(DOORBELL_CMD_BUFFER, DOORBELL_CMD_BUFFER);
-    db_cmd_info->db_channel->cb = &db_channel_callback;
-
-    if (!db_cmd_info->thread)
-    {
-        ret = rtos_create_thread(&db_cmd_info->thread,
-                                 4,
-                                 "db_cmd_srv",
-                                 (beken_thread_function_t)doorbell_cmd_server_thread,
-                                 1024 * 4,
-                                 (beken_thread_arg_t)NULL);
-        if (ret != kNoErr)
-        {
-            LOGE("Error: failed to create doorbell cmd server: %d\n", ret);
-        }
     }
 }
 

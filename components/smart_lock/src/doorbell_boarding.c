@@ -7,9 +7,7 @@
 #include "doorbell_comm.h"
 #include "doorbell_boarding.h"
 #include "doorbell_network.h"
-
-#include "doorbell_cs2_service.h"
-
+#include "network_transfer.h"
 #include "components/bluetooth/bk_ble.h"
 #include "components/bluetooth/bk_dm_ble.h"
 #include "components/bluetooth/bk_dm_bluetooth.h"

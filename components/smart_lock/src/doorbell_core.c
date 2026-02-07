@@ -9,16 +9,16 @@
 
 
 #include "doorbell_comm.h"
-#include "doorbell_sdp.h"
 #include "doorbell_cmd.h"
 #include "doorbell_devices.h"
 #include "doorbell_audio_device.h"
 #include "doorbell_network.h"
-#include "doorbell_cs2_service.h"
-#include "doorbell_udp_service.h"
-#include "doorbell_tcp_service.h"
+
 #include "doorbell_boarding.h"
 #include "components/bluetooth/bk_dm_bluetooth.h"
+
+#include "doorbell_network_transfer.h"
+#include "network_transfer.h"
 
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
 #define LOGW(...) BK_LOGW(TAG, ##__VA_ARGS__)
@@ -149,17 +149,14 @@ static void doorbell_message_handle(void)
 
                     db_info->service = DOORBELL_SERVICE_LAN_UDP;
 
-                    doorbell_cmd_server_init();
-                    doorbell_udp_service_init();
+                    doorbell_bk_network_transfer_init("udp_service", NULL);
                 }
                 break;
 
                 case DBEVT_LAN_UDP_SERVICE_START_RESPONSE:
                 {
                     LOGD("DBEVT_LAN_UDP_SERVICE_START_RESPONSE\n");
-
-                    doorbell_sdp_start("doorbell-udp", DOORBELL_CMD_PORT, DOORBELL_UDP_IMG_PORT, DOORBELL_UDP_AUD_PORT);
-
+                    ntwk_sdp_start("doorbell-udp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_UDP_VIDEO_PORT, NTWK_TRANS_UDP_AUDIO_PORT);
                     doorbell_boarding_event_notify(BOARDING_OP_SERVICE_UDP_START, BK_OK);
                 }
                 break;
@@ -176,17 +173,14 @@ static void doorbell_message_handle(void)
 
                     db_info->service = DOORBELL_SERVICE_LAN_TCP;
 
-                    doorbell_cmd_server_init();
-                    doorbell_tcp_service_init();
-
+                    doorbell_bk_network_transfer_init("tcp_service", NULL);
                 }
                 break;
 
                 case DBEVT_LAN_TCP_SERVICE_START_RESPONSE:
                 {
                     LOGD("DBEVT_LAN_TCP_SERVICE_START_RESPONSE\n");
-
-                    doorbell_sdp_start("doorbell-tcp", DOORBELL_CMD_PORT, DOORBELL_TCP_IMG_PORT, DOORBELL_TCP_AUD_PORT);
+                    ntwk_sdp_start("doorbell-tcp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_TCP_VIDEO_PORT, NTWK_TRANS_TCP_AUDIO_PORT);
 
                     doorbell_boarding_event_notify(BOARDING_OP_SERVICE_TCP_START, BK_OK);
                 }
@@ -205,10 +199,9 @@ static void doorbell_message_handle(void)
 
                     db_info->service = DOORBELL_SERVICE_P2P_CS2;
 
-                    p2p_cs2_key_t *key = (p2p_cs2_key_t *)msg.param;
+                   //p2p_cs2_key_t *key = (p2p_cs2_key_t *)msg.param;
+                    doorbell_bk_network_transfer_init("cs2_service", (void *)msg.param);
 
-                    doorbell_current_service = get_doorbell_cs2_service_interface();
-                    doorbell_current_service->init(key);
 #endif
                 }
                 break;
@@ -241,12 +234,11 @@ static void doorbell_message_handle(void)
                 {
                     if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
                     {
-                        doorbell_udp_update_remote_address((in_addr_t)msg.param);
-                        doorbell_sdp_reload();
+                        ntwk_sdp_reload(60000);
                     }
                     else if (db_info->service == DOORBELL_SERVICE_LAN_TCP)
                     {
-                        doorbell_sdp_reload();
+                        ntwk_sdp_reload(60000);
                     }
                 }
                 break;
@@ -258,27 +250,30 @@ static void doorbell_message_handle(void)
 
                     if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
                     {
-                        doorbell_sdp_start("doorbell-udp", DOORBELL_CMD_PORT, DOORBELL_UDP_IMG_PORT, DOORBELL_UDP_AUD_PORT);
+                        ntwk_sdp_start("doorbell-udp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_UDP_VIDEO_PORT, NTWK_TRANS_UDP_AUDIO_PORT);
                     }
                     else if (db_info->service == DOORBELL_SERVICE_LAN_TCP)
                     {
-                        doorbell_sdp_start("doorbell-tcp", DOORBELL_CMD_PORT, DOORBELL_TCP_IMG_PORT, DOORBELL_TCP_AUD_PORT);
+                        ntwk_sdp_start("doorbell-tcp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_TCP_VIDEO_PORT, NTWK_TRANS_TCP_AUDIO_PORT);
                     }
+
+
+
                 }
                 break;
 
                 case DBEVT_IMAGE_TCP_SERVICE_DISCONNECTED:
                 {
                     doorbell_video_transfer_turn_off();
-
                     if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
                     {
-                        doorbell_sdp_start("doorbell-udp", DOORBELL_CMD_PORT, DOORBELL_UDP_IMG_PORT, DOORBELL_UDP_AUD_PORT);
+                        ntwk_sdp_start("doorbell-udp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_UDP_VIDEO_PORT, NTWK_TRANS_UDP_AUDIO_PORT);
                     }
                     else if (db_info->service == DOORBELL_SERVICE_LAN_TCP)
                     {
-                        doorbell_sdp_start("doorbell-tcp", DOORBELL_CMD_PORT, DOORBELL_TCP_IMG_PORT, DOORBELL_TCP_AUD_PORT);
+                        ntwk_sdp_start("doorbell-tcp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_TCP_VIDEO_PORT, NTWK_TRANS_TCP_AUDIO_PORT);
                     }
+
                 }
                 break;
 
@@ -294,8 +289,7 @@ static void doorbell_message_handle(void)
 
 exit:
 
-    doorbell_sdp_stop();
-
+    ntwk_sdp_stop();
     /* delate msg queue */
     ret = rtos_deinit_queue(&db_info->queue);
 

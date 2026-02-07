@@ -19,7 +19,6 @@
 
 #include "doorbell_comm.h"
 #include "doorbell_network.h"
-#include "doorbell_transmission.h"
 #include "doorbell_cmd.h"
 
 #include "wifi_api.h"
@@ -153,131 +152,6 @@ int doorbell_wifi_soft_ap_start(char *ssid, char *key, uint16_t channel)
 #endif
 }
 
-int doorbell_socket_set_qos(int fd, int qos)
-{
-    int ret = setsockopt(fd, IPPROTO_IP, IP_TOS, &qos, sizeof(qos));
 
-    LOGD("%s\n", __func__);
 
-    if (ret < 0)
-    {
-        LOGE("%s failed: %d\n", ret);
-    }
-
-    return ret;
-}
-
-int doorbell_socket_sendto(int *fd, const struct sockaddr *dst, uint8_t *data, uint32_t length, int offset)
-{
-    int ret = 0;
-
-    uint8_t *ptr = data + offset;
-    uint16_t size = length - offset;
-    int max_retry = DOORBELL_SEND_MAX_RETRY;
-    uint16_t index = 0;
-
-    do
-    {
-
-        if (*fd < 0)
-        {
-            ret = -1;
-            break;
-        }
-
-        ret = sendto(*fd, ptr + index, size - index, MSG_DONTWAIT | MSG_MORE,
-                     dst, sizeof(struct sockaddr_in));
-
-        //LOGD("send: %d, %d\n", ret, size);
-
-        if (ret < 0)
-        {
-            if (errno == EAGAIN)
-            {
-                ret = 0;
-            }
-            else
-            {
-                LOGV("%s, %d, %d\n", __func__, ret, errno);
-                break;
-            }
-        }
-
-        index += ret;
-
-        if (index == size)
-        {
-            ret = size + offset;
-            break;
-        }
-
-        max_retry--;
-
-        if (max_retry < 0)
-        {
-            ret = -1;
-            max_retry = 0;
-            LOGE("reach max retry\n");
-            break;
-        }
-
-        rtos_delay_milliseconds(DOORBELL_SEND_MAX_DELAY);
-
-    }
-    while (index < size);
-
-    return ret;
-}
-
-int doorbell_socket_write(int *fd, uint8_t *data, uint32_t length, int offset)
-{
-    int ret = 0;
-
-    uint8_t *ptr = data + offset;
-    uint16_t size = length - offset;
-    int max_retry = DOORBELL_SEND_MAX_RETRY;
-    uint16_t index = 0;
-
-    do
-    {
-
-        if (*fd < 0)
-        {
-            ret = -1;
-            break;
-        }
-
-        ret = write(*fd, ptr + index, size - index);
-
-        //LOGD("send: %d, %d\n", ret, size);
-
-        if (ret < 0)
-        {
-            ret = 0;
-        }
-
-        index += ret;
-
-        if (index == size)
-        {
-            ret = size + offset;
-            break;
-        }
-
-        max_retry--;
-
-        if (max_retry < 0)
-        {
-            ret = -1;
-            LOGE("reach max retry\n");
-            break;
-        }
-
-        rtos_delay_milliseconds(DOORBELL_SEND_MAX_DELAY);
-
-    }
-    while (index < size);
-
-    return ret;
-}
 

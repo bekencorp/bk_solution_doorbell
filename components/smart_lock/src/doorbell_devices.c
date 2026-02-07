@@ -8,8 +8,7 @@
 #include "doorbell_cmd.h"
 #include "doorbell_devices.h"
 #include "frame/frame_que_v2.h"
-#include "doorbell_transmission.h"
-#include "doorbell_cs2_service.h"
+#include "modules/wifi.h"
 #include "decoder/decoder.h"
 #include "camera/camera.h"
 #include "gpio_driver.h"
@@ -54,6 +53,17 @@ extern const lcd_device_t lcd_device_custom_st7796s;
 db_device_info_t *db_device_info = NULL;
 
 
+typedef struct
+{
+    uint8_t enable;
+    image_format_t img_format;
+    beken_semaphore_t sem;
+    beken_thread_t transfer_thread;
+} db_trans_cfg_t;
+static db_trans_cfg_t *s_db_trans_cfg = NULL;
+extern media_debug_t *media_debug;
+
+
 static avdk_err_t doorbell_lcd_backlight_open(uint8_t bl_io)
 {
     gpio_dev_unmap(bl_io);
@@ -82,17 +92,8 @@ static avdk_err_t doorbell_lcd_ldo_close(uint8_t ldo_io)
     return AVDK_ERR_OK;
 }
 
-int doorbell_devices_set_camera_transfer_callback(void *cb)
-{
-    if (db_device_info)
-    {
-        db_device_info->video_transfer_cb = cb;
-    }
 
-    return AVDK_ERR_OK;
-}
-
-int doorbell_get_supported_camera_devices(int opcode, db_channel_t *channel, doorbell_transmission_send_t cb)
+int doorbell_get_supported_camera_devices(int opcode)
 {
     db_evt_head_t *evt = os_malloc(sizeof(db_evt_head_t) + DEVICE_RESPONSE_SIZE);
     char *p = (char *)(evt + 1);
@@ -112,14 +113,15 @@ int doorbell_get_supported_camera_devices(int opcode, db_channel_t *channel, doo
             0);
     evt->length = CHECK_ENDIAN_UINT16(strlen(p));
     evt->flags = EVT_FLAGS_COMPLETE;
-    doorbell_transmission_pack_send(channel, (uint8_t *)evt, sizeof(db_evt_head_t) + evt->length, cb);
+
+    ntwk_trans_ctrl_send((uint8_t *)evt, sizeof(db_evt_head_t) + evt->length);
 
     os_free(evt);
 
     return 0;
 }
 
-int doorbell_get_supported_lcd_devices(int opcode, db_channel_t *channel, doorbell_transmission_send_t cb)
+int doorbell_get_supported_lcd_devices(int opcode)
 {
     uint32_t i, size;
     size = get_lcd_devices_num();//media_app_get_lcd_devices_num();
@@ -156,7 +158,7 @@ int doorbell_get_supported_lcd_devices(int opcode, db_channel_t *channel, doorbe
                 evt->flags = EVT_FLAGS_COMPLETE;
             }
 
-            doorbell_transmission_pack_send(channel, (uint8_t *)evt, sizeof(db_evt_head_t) + evt->length, cb);
+            ntwk_trans_ctrl_send((uint8_t *)evt, sizeof(db_evt_head_t) + evt->length);
         }
     }
 
@@ -165,7 +167,7 @@ int doorbell_get_supported_lcd_devices(int opcode, db_channel_t *channel, doorbe
     return 0;
 }
 
-int doorbell_get_lcd_status(int opcode, db_channel_t *channel, doorbell_transmission_send_t cb)
+int doorbell_get_lcd_status(int opcode)
 {
     uint32_t lcd_status = db_device_info->display_ctlr_handle ? LCD_STATUS_OPEN : LCD_STATUS_CLOSE;
 
@@ -189,7 +191,7 @@ int doorbell_get_lcd_status(int opcode, db_channel_t *channel, doorbell_transmis
 
     evt->flags = EVT_FLAGS_COMPLETE;
 
-    doorbell_transmission_pack_send(channel, (uint8_t *)evt, sizeof(db_evt_head_t) + evt->length, cb);
+    ntwk_trans_ctrl_send((uint8_t *)evt, sizeof(db_evt_head_t) + evt->length);
 
     os_free(evt);
 
@@ -311,12 +313,6 @@ int doorbell_video_transfer_turn_on(void)
         return ret;
     }
 
-    if (info->video_transfer_cb == NULL)
-    {
-        LOGE("%s, transfer callback not register, %d\n", __func__, __LINE__);
-        return ret;
-    }
-
     if (info->handle == NULL)
     {
         LOGE("%s: camera not open!\n", __func__);
@@ -325,7 +321,7 @@ int doorbell_video_transfer_turn_on(void)
 
     frame_queue_v2_register_consumer(info->transfer_format, CONSUMER_TRANSMISSION);
 
-    ret = bk_wifi_transfer_frame_open(info->video_transfer_cb, info->transfer_format);
+    ret = doorbell_devices_start(info->transfer_format);
     if (ret == BK_OK)
     {
         LOGD("%s, success\n", __func__);
@@ -350,7 +346,7 @@ int doorbell_video_transfer_turn_off(void)
         return ret;
     }
 
-    ret = bk_wifi_transfer_frame_close();
+    ret = doorbell_devices_stop();
     if (ret == BK_OK)
     {
         LOGD("%s, success\n", __func__);
@@ -359,7 +355,7 @@ int doorbell_video_transfer_turn_off(void)
     frame_queue_v2_unregister_consumer(info->transfer_format, CONSUMER_TRANSMISSION);
 
 #if (CONFIG_INTEGRATION_DOORBELL_CS2)
-    doorbell_cs2_img_timer_deinit();
+   // ntwk_trans_cs2_video_timer_deinit();
 #endif
 
     return ret;
@@ -524,3 +520,144 @@ void doorbell_devices_deinit(void)
         db_device_info = NULL;
     }
 }
+
+bk_err_t doorbell_devices_stop(void)
+{
+	if (s_db_trans_cfg == NULL)
+	{
+		return BK_OK;
+	}
+
+	if (!s_db_trans_cfg->enable)
+	{
+		LOGE("%s, have been close!\r\n", __func__);
+		return BK_FAIL;
+	}
+
+	s_db_trans_cfg->enable = 0;
+	rtos_get_semaphore(&s_db_trans_cfg->sem, BEKEN_NEVER_TIMEOUT);
+
+	bk_wifi_set_wifi_media_mode(false);
+
+	bk_wifi_set_video_quality(WIFI_VIDEO_QUALITY_HD);
+    if (s_db_trans_cfg->transfer_thread)
+    {
+        rtos_delete_thread(s_db_trans_cfg->transfer_thread);
+        s_db_trans_cfg->transfer_thread = NULL;
+    }
+    os_free(s_db_trans_cfg);
+	s_db_trans_cfg = NULL;
+
+	LOGD("%s, close success!\r\n", __func__);
+
+	return BK_OK;
+}
+
+static void doorbell_devices_task_entry(beken_thread_arg_t data)
+{
+    db_trans_cfg_t *cfg = (db_trans_cfg_t *)data;
+    frame_buffer_t *frame = NULL;
+    cfg->enable = true;
+    rtos_set_semaphore(&cfg->sem);
+    uint32_t before = 0, after = 0;
+    uint8_t log_enable = 0;
+
+    while (cfg->enable)
+    {
+        frame = frame_queue_v2_get_frame(cfg->img_format, CONSUMER_TRANSMISSION, 50);
+        if (frame == NULL)
+        {
+            log_enable ++;
+            if (log_enable > 100)
+            {
+                LOGD("%s, read frame null format:%x\n", __func__, cfg->img_format);
+                log_enable = 0;
+            }
+            continue;
+        }
+
+        if (frame->sequence < 5)
+        {
+            LOGD("%s, frame sequence %d\n", __func__, frame->sequence);
+        }
+
+        log_enable = 0;
+        before = get_current_timestamp();
+        media_debug->begin_trs = true;
+        media_debug->end_trs = false;
+
+        ntwk_trans_video_send((uint8_t *)frame, frame->length,cfg->img_format);
+
+        media_debug->end_trs = true;
+        media_debug->begin_trs = false;
+
+        after = get_current_timestamp();
+
+        media_debug->meantimes += (after - before);
+        media_debug->fps_wifi++;
+        media_debug->wifi_kbps += frame->length;
+
+        frame_queue_v2_release_frame(cfg->img_format, CONSUMER_TRANSMISSION, frame);
+
+        frame = NULL;
+    }
+
+    cfg->transfer_thread = NULL;
+    rtos_set_semaphore(&cfg->sem);
+    rtos_delete_thread(NULL);
+}
+
+bk_err_t doorbell_devices_start(uint16_t img_format)
+{
+    if (s_db_trans_cfg)
+    {
+        LOGW("%s, already opened, img_format: %d", __func__, s_db_trans_cfg->img_format);
+        return BK_OK;
+    }
+
+    s_db_trans_cfg = os_malloc(sizeof(db_trans_cfg_t));
+    if (s_db_trans_cfg == NULL)
+    {
+        LOGE("% malloc failed\r\n", __func__);
+        return BK_ERR_NO_MEM;
+    }
+
+    memset(s_db_trans_cfg, 0, sizeof(db_trans_cfg_t));
+
+    s_db_trans_cfg->img_format = img_format;
+
+    if (rtos_init_semaphore(&s_db_trans_cfg->sem, 1) != BK_OK)
+    {
+        LOGE("%s rtos_init_semaphore failed\n", __func__);
+        goto error;
+    }
+
+// need create task to read frame
+bk_err_t ret = rtos_create_thread(&s_db_trans_cfg->transfer_thread,
+                                BEKEN_DEFAULT_WORKER_PRIORITY,
+                                "trs_task",
+                                (beken_thread_function_t)doorbell_devices_task_entry,
+                                2560,
+                                (beken_thread_arg_t)s_db_trans_cfg);
+
+    if (BK_OK != ret)
+    {
+        LOGE("%s transfer_app_task init failed\n", __func__);
+        ret = BK_ERR_NO_MEM;
+        goto error;
+    }
+
+    rtos_get_semaphore(&s_db_trans_cfg->sem, BEKEN_NEVER_TIMEOUT);
+
+    bk_wifi_set_wifi_media_mode(true);
+
+    bk_wifi_set_video_quality(WIFI_VIDEO_QUALITY_SD);
+
+    return BK_OK;
+
+error:
+    doorbell_devices_stop();
+    return BK_FAIL;
+}
+
+
