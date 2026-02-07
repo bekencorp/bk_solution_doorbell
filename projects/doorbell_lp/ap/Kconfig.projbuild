@@ -1,0 +1,15 @@
+menu "INTEGRATION_DOORBELL"
+
+    config INTEGRATION_DOORBELL
+        depends on VOICE_SERVICE && VOICE_READ_SERVICE && VOICE_WRITE_SERVICE
+        bool "Doorbell integration"
+        default n
+    config INTEGRATION_DOORVIEWER
+        depends on VOICE_SERVICE && VOICE_READ_SERVICE && VOICE_WRITE_SERVICE
+        bool "Doorviewer integration"
+        default n
+    config INTEGRATION_DOORBELL_CS2
+        depends on INTEGRATION_DOORBELL || INTEGRATION_DOORVIEWER
+        bool "Doorbell integration CS2"
+        default n
+endmenu
