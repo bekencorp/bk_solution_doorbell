@@ -36,7 +36,8 @@
 #define BOARDING_UUID                       (0xFE01)
 
 /* Doorbell version: 1 = v1, 2 = v2, etc. */
-#define DOORBELL_VERSION                    (2)
+#define DOORBELL_VERSION                       (1)
+#define DOORBELL_LP_VERSION                    (2)
 
 static doorbell_boarding_info_t *doorbell_boarding_info = NULL;
 static p2p_cs2_key_t *p2p_cs2_key = NULL;
@@ -407,7 +408,11 @@ int doorbell_boarding_init(void)
     adv_data[adv_index++] = ADV_TYPE_MANUFACTURER_SPECIFIC;
     adv_data[adv_index++] = BEKEN_COMPANY_ID & 0xFF;
     adv_data[adv_index++] = BEKEN_COMPANY_ID >> 8;
-    adv_data[adv_index++] = DOORBELL_VERSION;  /* version info: 1=v1, 2=v2, etc. */
+    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    adv_data[adv_index++] = DOORBELL_LP_VERSION;
+    #else
+    adv_data[adv_index++] = DOORBELL_VERSION;
+    #endif
     adv_data[len_index] = 4;  /* type(1) + company_id(2) + version(1) = 4 bytes */
 
     /*
