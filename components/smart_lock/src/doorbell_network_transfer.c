@@ -37,28 +37,35 @@ bk_err_t doorbell_bk_net_audio_recv(uint8_t *data, uint32_t length)
 
 void doorbell_bk_net_msg_evt_handle(ntwk_trans_event_t *event)
 {
-    ntwk_trans_ctxt_t *ctxt = ntwk_trans_get_ctxt();
+    const char *service_name = ntwk_trans_get_service_name();
+
+    if (service_name == NULL)
+    {
+        LOGE("%s, service_name is NULL\n", __func__);
+        return;
+    }
+
     doorbell_msg_t msg = {0};
 
     switch (event->code)
     {
         case NTWK_TRANS_EVT_START:
         {
-            if (strcmp(ctxt->service_name, "tcp_service") == 0)
+            if (strcmp(service_name, "tcp_service") == 0)
             {
                 if (event->chan_type == NTWK_TRANS_CHAN_VIDEO)
                 {
                     msg.event = DBEVT_LAN_TCP_SERVICE_START_RESPONSE;
                 }
             }
-            else if (strcmp(ctxt->service_name, "udp_service") == 0)
+            else if (strcmp(service_name, "udp_service") == 0)
             {
                 if (event->chan_type == NTWK_TRANS_CHAN_VIDEO)
                 {
                     msg.event = DBEVT_LAN_UDP_SERVICE_START_RESPONSE;
                 }
             }
-            else if (strcmp(ctxt->service_name, "cs2_service") == 0)
+            else if (strcmp(service_name, "cs2_service") == 0)
             {
                 if (event->chan_type == NTWK_TRANS_CHAN_CTRL)
                 {
@@ -68,14 +75,14 @@ void doorbell_bk_net_msg_evt_handle(ntwk_trans_event_t *event)
         } break;
         case NTWK_TRANS_EVT_CONNECTED:
         {
-            if(strcmp(ctxt->service_name, "tcp_service") == 0)
+            if(strcmp(service_name, "tcp_service") == 0)
             {
                 if (event->chan_type == NTWK_TRANS_CHAN_CTRL)
                 {
                     msg.event = DBEVT_REMOTE_DEVICE_CONNECTED;
                 }
             }
-            else if(strcmp(ctxt->service_name, "udp_service") == 0)
+            else if(strcmp(service_name, "udp_service") == 0)
             {
                 if (event->chan_type == NTWK_TRANS_CHAN_CTRL)
                 {
@@ -85,7 +92,7 @@ void doorbell_bk_net_msg_evt_handle(ntwk_trans_event_t *event)
         } break;
         case NTWK_TRANS_EVT_DISCONNECTED:
         {
-            if(strcmp(ctxt->service_name, "tcp_service") == 0)
+            if(strcmp(service_name, "tcp_service") == 0)
             {
                 if (event->chan_type == NTWK_TRANS_CHAN_CTRL)
                 {
@@ -106,7 +113,7 @@ void doorbell_bk_net_msg_evt_handle(ntwk_trans_event_t *event)
         } break;
         case NTWK_TRANS_EVT_STOP:
         {
-            if(strcmp(ctxt->service_name, "cs2_service") == 0)
+            if(strcmp(service_name, "cs2_service") == 0)
             {
                 if (event->chan_type == NTWK_TRANS_CHAN_CTRL)
                 {

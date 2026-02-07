@@ -60,10 +60,23 @@ int doorbell_audio_turn_off(void)
 
     gl_db_audio_device_info->audio_enable = BK_FALSE;
 
+    #if 0
     if (doorbell_current_service
         && doorbell_current_service->audio_state_changed)
     {
         doorbell_current_service->audio_state_changed(DB_TURN_OFF);
+    }
+    #endif
+    const char *service_name = ntwk_trans_get_service_name();
+
+    if (service_name == NULL)
+    {
+        LOGE("%s, service_name is NULL\n", __func__);
+        return BK_FAIL;
+    }
+    if (strcmp(service_name, "cs2_service") == 0)
+    {
+        ntwk_trans_chan_stop(NTWK_TRANS_CHAN_AUDIO);
     }
 
     if (gl_db_audio_device_info->voice_read_handle)
@@ -330,10 +343,24 @@ int doorbell_audio_turn_on(audio_parameters_t *parameters)
 
     gl_db_audio_device_info->audio_enable = BK_TRUE;
 
+    #if 0
     if (doorbell_current_service
         && doorbell_current_service->audio_state_changed)
     {
         doorbell_current_service->audio_state_changed(DB_TURN_ON);
+    }
+    #endif
+
+    const char *service_name = ntwk_trans_get_service_name();
+
+    if (service_name == NULL)
+    {
+        LOGE("%s, service_name is NULL\n", __func__);
+        return BK_FAIL;
+    }
+    if (strcmp(service_name, "cs2_service") == 0)
+    {
+        ntwk_trans_chan_start(NTWK_TRANS_CHAN_AUDIO, NULL);
     }
 
     return BK_OK;
