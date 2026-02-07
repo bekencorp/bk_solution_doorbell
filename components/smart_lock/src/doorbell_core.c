@@ -20,6 +20,11 @@
 #include "doorbell_network_transfer.h"
 #include "network_transfer.h"
 
+// Forward declaration for keepalive functions
+__attribute__((weak)) void db_keepalive_send_keepalive(void) { }
+__attribute__((weak)) void db_keepalive_on_service_start_success(void) { }
+__attribute__((weak)) bk_err_t db_keepalive_start_mm_status_check(void) { return BK_OK; }
+
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
 #define LOGW(...) BK_LOGW(TAG, ##__VA_ARGS__)
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
@@ -148,7 +153,11 @@ static void doorbell_message_handle(void)
                     }
 
                     db_info->service = DOORBELL_SERVICE_LAN_UDP;
-
+                    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+                    db_ntwk_service_info_t service_info;
+                    service_info.db_service = db_info->service;
+                    doorbell_save_ntwk_service_info_to_flash(&service_info);
+                    #endif
                     doorbell_bk_network_transfer_init("udp_service", NULL);
                 }
                 break;
@@ -156,7 +165,9 @@ static void doorbell_message_handle(void)
                 case DBEVT_LAN_UDP_SERVICE_START_RESPONSE:
                 {
                     LOGD("DBEVT_LAN_UDP_SERVICE_START_RESPONSE\n");
+                    #if !CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     ntwk_sdp_start("doorbell-udp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_UDP_VIDEO_PORT, NTWK_TRANS_UDP_AUDIO_PORT);
+                    #endif
                     doorbell_boarding_event_notify(BOARDING_OP_SERVICE_UDP_START, BK_OK);
                 }
                 break;
@@ -172,7 +183,11 @@ static void doorbell_message_handle(void)
                     }
 
                     db_info->service = DOORBELL_SERVICE_LAN_TCP;
-
+                    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+                    db_ntwk_service_info_t service_info;
+                    service_info.db_service = db_info->service;
+                    doorbell_save_ntwk_service_info_to_flash(&service_info);
+                    #endif
                     doorbell_bk_network_transfer_init("tcp_service", NULL);
                 }
                 break;
@@ -180,9 +195,12 @@ static void doorbell_message_handle(void)
                 case DBEVT_LAN_TCP_SERVICE_START_RESPONSE:
                 {
                     LOGD("DBEVT_LAN_TCP_SERVICE_START_RESPONSE\n");
+                    #if !CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     ntwk_sdp_start("doorbell-tcp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_TCP_VIDEO_PORT, NTWK_TRANS_TCP_AUDIO_PORT);
+                    #endif
 
                     doorbell_boarding_event_notify(BOARDING_OP_SERVICE_TCP_START, BK_OK);
+
                 }
                 break;
 
@@ -232,6 +250,7 @@ static void doorbell_message_handle(void)
 
                 case DBEVT_REMOTE_DEVICE_CONNECTED:
                 {
+                    #if !CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
                     {
                         ntwk_sdp_reload(60000);
@@ -240,6 +259,10 @@ static void doorbell_message_handle(void)
                     {
                         ntwk_sdp_reload(60000);
                     }
+                    #endif
+
+                    db_keepalive_on_service_start_success();
+                    db_keepalive_start_mm_status_check();
                 }
                 break;
 
@@ -248,6 +271,7 @@ static void doorbell_message_handle(void)
                     doorbell_video_transfer_turn_off();
                     doorbell_audio_turn_off();
 
+                    #if !CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
                     {
                         ntwk_sdp_start("doorbell-udp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_UDP_VIDEO_PORT, NTWK_TRANS_UDP_AUDIO_PORT);
@@ -256,7 +280,7 @@ static void doorbell_message_handle(void)
                     {
                         ntwk_sdp_start("doorbell-tcp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_TCP_VIDEO_PORT, NTWK_TRANS_TCP_AUDIO_PORT);
                     }
-
+                    #endif
 
 
                 }
@@ -265,6 +289,7 @@ static void doorbell_message_handle(void)
                 case DBEVT_IMAGE_TCP_SERVICE_DISCONNECTED:
                 {
                     doorbell_video_transfer_turn_off();
+                    #if !CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
                     {
                         ntwk_sdp_start("doorbell-udp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_UDP_VIDEO_PORT, NTWK_TRANS_UDP_AUDIO_PORT);
@@ -273,7 +298,32 @@ static void doorbell_message_handle(void)
                     {
                         ntwk_sdp_start("doorbell-tcp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_TCP_VIDEO_PORT, NTWK_TRANS_TCP_AUDIO_PORT);
                     }
+                    #endif
+                }
+                break;
 
+                case DBEVT_SET_SERVER_NET_INFO:
+                {
+                    LOGD("DBEVT_SET_SERVER_NET_INFO\n");
+                    doorbell_boarding_event_notify(BOARDING_OP_SET_SERVER_NET_INFO, BK_OK);
+                }
+                break;
+
+                case DBEVT_LAN_TCP_SERVICE_STOP:
+                {
+                    LOGD("DBEVT_LAN_TCP_SERVICE_STOP\n");
+                    doorbell_bk_network_transfer_deinit("tcp_service");
+                    // Send keepalive after service stops
+                    db_keepalive_send_keepalive();
+                }
+                break;
+
+                case DBEVT_LAN_UDP_SERVICE_STOP:
+                {
+                    LOGD("DBEVT_LAN_UDP_SERVICE_STOP\n");
+                    doorbell_bk_network_transfer_deinit("udp_service");
+                    // Send keepalive after service stops
+                    db_keepalive_send_keepalive();
                 }
                 break;
 
@@ -288,8 +338,9 @@ static void doorbell_message_handle(void)
     }
 
 exit:
-
+#if !CONFIG_NTWK_CLIENT_SERVICE_ENABLE
     ntwk_sdp_stop();
+#endif
     /* delate msg queue */
     ret = rtos_deinit_queue(&db_info->queue);
 

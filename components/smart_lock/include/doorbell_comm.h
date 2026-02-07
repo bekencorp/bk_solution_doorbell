@@ -1,6 +1,10 @@
 #ifndef __DOORBELL_COMM_H__
 #define __DOORBELL_COMM_H__
 
+#if (CONFIG_EASY_FLASH && CONFIG_EASY_FLASH_V4)
+#include "bk_ef.h"
+#endif
+
 #define UVC_DEVICE_ID (0xFDF6)
 
 typedef enum
@@ -32,7 +36,11 @@ typedef enum
     DBEVT_EXIT,
 
     DBEVT_IMAGE_TCP_SERVICE_DISCONNECTED,
-    DBEVT_VOICE_EVENT
+    DBEVT_VOICE_EVENT,
+
+    DBEVT_SET_SERVER_NET_INFO,
+    DBEVT_LAN_TCP_SERVICE_STOP,
+    DBEVT_LAN_UDP_SERVICE_STOP,
 } dbevt_t;
 
 typedef enum
@@ -55,9 +63,6 @@ typedef enum
     DB_TURN_OFF,
     DB_TURN_ON,
 } doorbell_state_t;
-
-
-
 
 bk_err_t doorbell_send_msg(doorbell_msg_t *msg);
 

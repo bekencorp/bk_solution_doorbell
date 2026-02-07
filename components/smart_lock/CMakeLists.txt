@@ -45,7 +45,7 @@ endif()#CONFIG_INTEGRATION_DOORVIEWER
 
 endif()
 
-set(priv_req multimedia bk_display media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bt bk_video_pipeline bk_camera)
+set(req multimedia bk_display media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bt bk_video_pipeline bk_camera)
 
-armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" PRIV_REQUIRES "${priv_req}"
+armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" REQUIRES "${req}"
 )
