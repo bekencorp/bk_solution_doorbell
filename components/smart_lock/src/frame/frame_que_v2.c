@@ -825,6 +825,7 @@ bk_err_t frame_queue_v2_register_consumer(image_format_t format, uint32_t consum
     frame_node_t *node = frame_queue_v2[index].ready_list.head;
     frame_node_t *next_node = NULL;
     uint32_t cleaned_count = 0;
+    uint32_t skipped_count = 0;
 
     while (node != NULL)
     {
@@ -849,13 +850,17 @@ bk_err_t frame_queue_v2_register_consumer(image_format_t format, uint32_t consum
             frame_list_add_tail_nolock(&frame_queue_v2[index].free_list, node);
             cleaned_count++;
         }
+        else
+        {
+            skipped_count++;
+        }
         node = next_node;
     }
 
     fb_exit_critical(flags);
 
-    LOGI("%s format:%d, consumer:0x%x, active_consumers:0x%x, cleaned:%d\n",
-         __func__, format, consumer_id, frame_queue_v2[index].active_consumers, cleaned_count);
+    LOGI("%s format:%d, consumer:0x%x, active_consumers:0x%x, cleaned:%d, skipped:%d\n",
+         __func__, format, consumer_id, frame_queue_v2[index].active_consumers, cleaned_count, skipped_count);
 
     return BK_OK;
 }
@@ -1098,14 +1103,6 @@ frame_buffer_t *frame_queue_v2_malloc(image_format_t format, uint32_t size)
     node->accessed_mask = 0;
     node->timestamp = get_current_timestamp_ms();
 
-    // Read active consumer mask (protected by fb_enter_critical)
-    flags = fb_enter_critical();
-    node->consumer_mask = frame_queue_v2[index].active_consumers;
-    fb_exit_critical(flags);
-
-    // Node stays in free_list, marked as in-use by in_use=1
-    // complete will find nodes with in_use=1, remove and add to ready_list
-
     frame_queue_v2[index].total_malloc++;
 
     return frame;
@@ -1229,6 +1226,7 @@ bk_err_t frame_queue_v2_cancel(image_format_t format, frame_buffer_t *frame)
     // Find corresponding node from free_list (find nodes with in_use=1 and matching frame)
     // Use fb_enter_critical (disable interrupt + spinlock), supports interrupt context calling
     frame_node_t *node = NULL;
+    frame_buffer_t *frame_to_free = NULL;
     uint32_t flags = fb_enter_critical();
 
     frame_node_t *temp = frame_queue_v2[index].free_list.head;
@@ -1237,7 +1235,10 @@ bk_err_t frame_queue_v2_cancel(image_format_t format, frame_buffer_t *frame)
         if (temp->in_use == 1 && temp->frame == frame)
         {
             node = temp;
-            node->in_use = 0;  // Clear in-use flag
+            // Save frame pointer before clearing, to free outside critical section
+            frame_to_free = node->frame;
+            node->frame = NULL;
+            node->in_use = 0;  // Clear in-use flag last, after all fields are reset
             break;
         }
         temp = temp->next;
@@ -1251,27 +1252,28 @@ bk_err_t frame_queue_v2_cancel(image_format_t format, frame_buffer_t *frame)
         return BK_FAIL;
     }
 
-    LOG_DEBUG("%s CANCEL: node:%p, frame:%p (release frame buffer)\n", __func__, node, frame);
+    LOG_DEBUG("%s CANCEL: node:%p, frame:%p (release frame buffer)\n", __func__, node, frame_to_free);
 
-    // Free frame buffer
-    if (node->frame != NULL)
+    // Free frame buffer outside critical section (may take time)
+    if (frame_to_free != NULL)
     {
         switch (format)
         {
             case IMAGE_MJPEG:
             case IMAGE_H264:
-                frame_buffer_encode_free(node->frame);
+                frame_buffer_encode_free(frame_to_free);
                 break;
             case IMAGE_YUV:
-                frame_buffer_display_free(node->frame);
+                frame_buffer_display_free(frame_to_free);
                 break;
             default:
                 break;
         }
-        node->frame = NULL;  // Prevent double free
+
+        // Update statistics: increment total_free count
+        frame_queue_v2[index].total_free++;
     }
 
-    // Node stays in free_list, in_use reset to 0, can be reused
     return BK_OK;
 }
 

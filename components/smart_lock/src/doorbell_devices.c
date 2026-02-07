@@ -483,7 +483,7 @@ int doorbell_display_turn_off(void)
     doorbell_lcd_ldo_close(LCD_LDO_GPIO);
     if (info->handle == NULL)
     {
-        //frame_queue_v2_clear_all();
+        frame_queue_v2_clear_all();
     }
     LOGD("%s success\n", __func__);
     return ret;
