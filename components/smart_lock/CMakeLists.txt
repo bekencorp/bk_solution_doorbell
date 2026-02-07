@@ -11,29 +11,25 @@ if (CONFIG_INTEGRATION_DOORBELL OR CONFIG_INTEGRATION_DOORVIEWER)
 		src/doorbell_devices.c
 		src/doorbell_cmd.c
 		src/bk_smart_config.c
-		src/camera/uvc.c
-		src/camera/dvp.c
 		src/decoder/mjpeg_decoder.c
 		src/yuv_display/yuv_display.c
 	)
 
-	# V1版本：多消费者帧队列管理（可选）
-	# 取消下面的注释来启用V1版本
-	# list(APPEND srcs
-	# 	src/frame/frame_que.c
-	# )
-
-	# V2版本：多消费者帧队列管理（可选）
-	# 取消下面的注释来启用V2版本
 	list(APPEND srcs
 		src/frame/frame_que_v2.c
 	)
 
-	# V2测试代码（可选，仅用于开发和测试）
-	# 取消下面的注释来启用测试
-	# list(APPEND srcs
-	# 	src/frame/frame_que_v2_test.c
-	# )
+if (CONFIG_DVP_CAMERA)
+	list(APPEND srcs
+		src/camera/dvp.c
+	)
+endif()
+
+if (CONFIG_USB_CAMERA)
+	list(APPEND srcs
+		src/camera/uvc.c
+	)
+endif()
 
 if (CONFIG_INTEGRATION_DOORBELL)
 	list(APPEND srcs

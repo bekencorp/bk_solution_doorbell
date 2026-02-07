@@ -35,12 +35,16 @@ int doorbell_camera_open(db_device_info_t *info, camera_parameters_t *parameters
     if (parameters->id == UVC_DEVICE_ID)
     {
         info->cam_type = UVC_CAMERA;
+#ifdef CONFIG_USB_CAMERA
         info->handle = uvc_camera_turn_on(parameters);
+#endif
     }
     else
     {
         info->cam_type = DVP_CAMERA;
+#ifdef CONFIG_DVP_CAMERA
         info->handle = dvp_camera_turn_on(parameters);
+#endif
     }
 
     if (info->handle == NULL)
@@ -85,11 +89,15 @@ int doorbell_camera_close(db_device_info_t *info)
 
     if (info->cam_type == UVC_CAMERA)
     {
+#ifdef CONFIG_USB_CAMERA
         ret = uvc_camera_turn_off(info->handle);
+#endif
     }
     else
     {
+#ifdef CONFIG_DVP_CAMERA
         ret = dvp_camera_turn_off(info->handle);
+#endif
     }
 
     return ret;
