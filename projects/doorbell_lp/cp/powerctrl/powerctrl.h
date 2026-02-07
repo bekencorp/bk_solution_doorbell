@@ -21,7 +21,7 @@ typedef enum
     POWERUP_POWER_WAKEUP_FLAG = 1,                   //Normal power-on startup
     POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG = 2,         //Multimedia Wake up request
     POWERUP_KEEPALIVE_DISCONNECTION = 3,             //Keepalive disconnection startup
-    POWERUP_KEEPALIVE_WAKEUP_FLAG = 4,               //Keepalive wakeup
+    POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG = 4,          //Keepalive failure wakeup
 }POWERUP_FLAGS;
 
 typedef struct

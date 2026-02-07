@@ -209,6 +209,8 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 
     LOGD("%s, opcode: %u, param: %u, length: %u\n", __func__, cmd.opcode, cmd.param, cmd.length);
 
+    db_keepalive_update_timestamp();
+
     switch (cmd.opcode)
     {
         case DBCMD_SET_SERVICE_TYPE:
@@ -270,6 +272,7 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 
         case DBCMD_SET_CAMERA_TURN_ON:
         {
+            //GPIO_UP(52);
             if (cmd.length != sizeof(camera_parameters_t))
             {
                 LOGV("error\n");
@@ -307,7 +310,7 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             {
                 doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, true);
             }
-
+            //GPIO_DOWN(52);
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
@@ -476,7 +479,6 @@ uint32_t doorbell_mm_service_vote(mm_status_bit_t service_bit, bool vote_add)
     {
         // Add vote (set bit)
         mm_service_status |= bit_mask;
-       // db_keepalive_update_timestamp();
         LOGD("%s: Service bit %d vote added, status: 0x%x\n", __func__, service_bit, mm_service_status);
     }
     else

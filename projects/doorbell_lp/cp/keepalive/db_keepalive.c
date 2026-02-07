@@ -1,5 +1,6 @@
 #include "db_keepalive.h"
 #include "db_pack.h"
+#include "db_ipc_msg.h"
 #include <os/mem.h>
 #include <os/str.h>
 #include <driver/pwr_clk.h>
@@ -20,6 +21,8 @@
 #define LOGV(...)   BK_LOGV(DBK_TAG, ##__VA_ARGS__)
 
 static db_keepalive_env_t s_keepalive_env = {0};
+static bool s_host_powered_down = false;
+static bool s_notify_ap_keepalive_failed = false;
 
 // Print packed data content in hex format
 static void db_keepalive_print_packed_data(uint8_t *pack_ptr, uint32_t pack_len)
@@ -118,6 +121,8 @@ void db_tx_cmd_recive_callback(uint8_t *data, uint16_t length)
         case DBCMD_WAKE_UP_REQUEST:
         {
             LOGI("%s: WAKE_UP_REQUEST\n", __func__);
+            //GPIO_UP(50);
+           // GPIO_DOWN(50);
             pl_wakeup_host(POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG);
         }
         break;
@@ -210,7 +215,6 @@ static void db_keepalive_stop_keepalive_rtc(void)
 {
     // Force unregister previous if doesn't finish
     bk_alarm_unregister(AON_RTC_ID_1, s_keepalive_env.keepalive_rtc.name);
-    LOGI("%s: Stop keepalive RTC\n", __func__);
 }
 
 static void db_keepalive_timer_handler(void *data)
@@ -396,14 +400,16 @@ static void db_keepalive_tx_handler(void *arg)
 
     LOGI("%s: TX handler started\n", __func__);
 
-    // Power down host
-    pl_power_down_host();
+    s_host_powered_down = false;
+    s_notify_ap_keepalive_failed = false;
+
     // Add CIF filter for keepalive server
     cif_filter_add_customer_filter(inet_addr(s_keepalive_env.server), s_keepalive_env.port);
 
     // Initialize connection
     if (db_keepalive_init_connection() != BK_OK) {
         LOGE("%s: Failed to initialize connection\n", __func__);
+        s_notify_ap_keepalive_failed = true;
         goto _exit;
     }
 
@@ -411,8 +417,13 @@ static void db_keepalive_tx_handler(void *arg)
     ret = db_keepalive_init_rx();
     if (ret != BK_OK) {
         LOGE("%s: Failed to init RX\n", __func__);
+        s_notify_ap_keepalive_failed = true;
         goto _exit;
     }
+
+    // Power down host
+    pl_power_down_host();
+    s_host_powered_down = true;
 
     // Start low voltage sleep
     db_keepalive_start_lv_sleep();
@@ -425,12 +436,14 @@ static void db_keepalive_tx_handler(void *arg)
                           NULL);
     if (ret != BK_OK) {
         LOGE("%s: Failed to init timer\n", __func__);
+        s_notify_ap_keepalive_failed = true;
         goto _exit;
     }
 
     ret = rtos_start_timer(&s_keepalive_env.timer);
     if (ret != BK_OK) {
         LOGE("%s: Failed to start timer\n", __func__);
+        s_notify_ap_keepalive_failed = true;
         goto _exit;
     }
 
@@ -460,6 +473,14 @@ static void db_keepalive_tx_handler(void *arg)
     }
 
 _exit:
+    if (s_notify_ap_keepalive_failed) {
+        if (s_host_powered_down) {
+            pl_wakeup_host(POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG);
+        } else {
+            pl_set_wakeup_reason(POWERUP_KEEPALIVE_DISCONNECTION);
+            db_ipc_send_event(DB_IPC_EVENT_KEEPALIVE_DISCONNECTION, NULL, 0);
+        }
+    }
     LOGI("%s: TX handler exited\n", __func__);
     db_keepalive_cp_deinit();
 }
@@ -571,6 +592,9 @@ bk_err_t db_keepalive_cp_deinit(void)
 
     s_keepalive_env.keepalive_ongoing = false;
 
+    // Remove CIF filter
+    cif_filter_add_customer_filter(0, 0);
+
     // Stop RTC timer
     db_keepalive_stop_keepalive_rtc();
 
@@ -591,9 +615,6 @@ bk_err_t db_keepalive_cp_deinit(void)
         closesocket(s_keepalive_env.sock);
         s_keepalive_env.sock = -1;
     }
-
-    // Remove CIF filter
-    cif_filter_add_customer_filter(0, 0);
 
     // Delete threads
     if (s_keepalive_env.tx_thread) {

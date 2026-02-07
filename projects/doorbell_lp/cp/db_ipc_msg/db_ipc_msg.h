@@ -25,6 +25,7 @@ typedef enum{
     DB_IPC_CMD_GET_WAKEUP_ENV_ADDR        = 0x0004,
 
     DB_IPC_EVENT_BLE_DATA_TO_USER         = 0x1001,
+    DB_IPC_EVENT_KEEPALIVE_DISCONNECTION  = 0x1002,
 }db_ipc_cmd_event;
 
 typedef struct

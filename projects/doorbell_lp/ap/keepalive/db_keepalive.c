@@ -105,10 +105,9 @@ static void db_keepalive_mm_status_check_timer_handler(void *data)
 
             LOGD("%s: Time since last update: %llu ms\n", __func__, (unsigned long long)time_diff);
 
-            // If time difference is less than 30 seconds, skip keepalive
-            if (time_diff < MM_STATUS_CHECK_INTERVAL_MS) {
-                LOGI("%s: Last update was %llu ms ago (< %d ms), skipping keepalive\n", 
-                     __func__, (unsigned long long)time_diff, MM_STATUS_CHECK_INTERVAL_MS);
+            if (time_diff < MM_STATUS_CHECK_MIN_INTERVAL_MS) {
+                LOGI("%s: Last update was %llu ms ago (< %d ms), skipping keepalive\n",
+                     __func__, (unsigned long long)time_diff, MM_STATUS_CHECK_MIN_INTERVAL_MS);
                 return;
             }
         }
@@ -228,6 +227,18 @@ static bk_err_t db_keepalive_send_cmd_to_callback(uint32_t cmd_opcode, uint32_t 
     return BK_OK;
 }
 
+void db_keepalive_on_keepalive_disconnection(void)
+{
+    bk_err_t ret;
+
+    LOGI("%s: Keepalive establishment failed, re-enabling service\n", __func__);
+    s_pending_keepalive_after_service_stop = false;
+    ret = db_keepalive_start_service_from_flash();
+    if (ret != BK_OK) {
+        LOGE("%s: Failed to start service from flash\n", __func__);
+    }
+}
+
 // Function to handle service start success and send pending command
 void db_keepalive_on_service_start_success(void)
 {
@@ -299,6 +310,32 @@ void db_keepalive_handle_wakeup_reason(void)
             s_pending_wakeup_cmd = DBCMD_WAKE_UP_REQUEST;
             LOGI("%s: Will send DBCMD_WAKE_UP_REQUEST after service starts\n", __func__);
             break;
+
+        case POWERUP_KEEPALIVE_DISCONNECTION:
+
+            LOGI("%s: Keepalive establishment failed, re-enabling service\n", __func__);
+            s_pending_keepalive_after_service_stop = false;
+            ret = db_keepalive_start_service_from_flash();
+            if (ret != BK_OK) {
+                LOGE("%s: Failed to start service from flash\n", __func__);
+            }
+            break;
+
+        case POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG:
+            LOGI("%s: Keepalive failure wakeup, disable BT and start service\n", __func__);
+            ret = db_keepalive_disable_bluetooth();
+            if (ret != BK_OK) {
+                LOGE("%s: Failed to disable Bluetooth\n", __func__);
+                break;
+            }
+
+            s_pending_keepalive_after_service_stop = false;
+            ret = db_keepalive_start_service_from_flash();
+            if (ret != BK_OK) {
+                LOGE("%s: Failed to start service from flash\n", __func__);
+            }
+            break;
+
         default:
             // Invalid or unknown wakeup reason
             LOGW("%s: Invalid or unknown wakeup reason: 0x%x\n", __func__, wakeup_reason);
@@ -348,7 +385,7 @@ void db_keepalive_update_timestamp(void)
 
 void db_keepalive_send_keepalive(void)
 {
-    bk_err_t ret;
+    bk_err_t ret = BK_OK;
     ntwk_server_net_info_t net_info;
 
     // Check if there's a pending keepalive request
@@ -375,7 +412,13 @@ void db_keepalive_send_keepalive(void)
     }
 
     // Send keepalive command with IP address and cmd_port
-    db_ipc_start_keepalive((const char *)net_info.ip_addr, (const char *)net_info.cmd_port);
+    ret = db_ipc_start_keepalive((const char *)net_info.ip_addr, (const char *)net_info.cmd_port);
+    if (ret != BK_OK) {
+        LOGE("%s: Failed to send keepalive command\n", __func__);
+        return;
+    }
+
+    db_keepalive_stop_mm_status_check();
 }
 
 bk_err_t db_keepalive_stop_mm_status_check(void)

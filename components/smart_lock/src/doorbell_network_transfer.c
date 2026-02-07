@@ -131,17 +131,9 @@ static dbevt_t handle_connected_event(db_ntwk_type_t ntwk_type, chan_type_t chan
             #else
             set_chan_connected(chan_type);
             if (check_all_channels_connected()) {
-                #if 0
-                if (ntwk_type == DB_NTWK_TYPE_TCP) {
-                    return DBEVT_LAN_TCP_SERVICE_START_RESPONSE;
-                } else if (ntwk_type == DB_NTWK_TYPE_UDP) {
-                    return DBEVT_LAN_UDP_SERVICE_START_RESPONSE;
-                }
-                #else
                 if (ntwk_type == DB_NTWK_TYPE_TCP || ntwk_type == DB_NTWK_TYPE_UDP || ntwk_type == DB_NTWK_TYPE_CS2) {
                     return DBEVT_REMOTE_DEVICE_CONNECTED;
                 }
-                #endif
             }
             #endif
         } break;
@@ -155,17 +147,9 @@ static dbevt_t handle_connected_event(db_ntwk_type_t ntwk_type, chan_type_t chan
             #else
             set_chan_connected(chan_type);
             if (check_all_channels_connected()) {
-                #if 0
-                if (ntwk_type == DB_NTWK_TYPE_TCP) {
-                    return DBEVT_LAN_TCP_SERVICE_START_RESPONSE;
-                } else if (ntwk_type == DB_NTWK_TYPE_UDP) {
-                    return DBEVT_LAN_UDP_SERVICE_START_RESPONSE;
-                }
-                #else
                 if (ntwk_type == DB_NTWK_TYPE_TCP || ntwk_type == DB_NTWK_TYPE_UDP || ntwk_type == DB_NTWK_TYPE_CS2) {
                     return DBEVT_REMOTE_DEVICE_CONNECTED;
                 }
-                #endif
             }
             #endif
         } break;
@@ -180,17 +164,9 @@ static dbevt_t handle_connected_event(db_ntwk_type_t ntwk_type, chan_type_t chan
             #else
             set_chan_connected(chan_type);
             if (check_all_channels_connected()) {
-                #if 0
-                if (ntwk_type == DB_NTWK_TYPE_TCP) {
-                    return DBEVT_LAN_TCP_SERVICE_START_RESPONSE;
-                } else if (ntwk_type == DB_NTWK_TYPE_UDP) {
-                    return DBEVT_LAN_UDP_SERVICE_START_RESPONSE;
-                }
-                #else
                 if (ntwk_type == DB_NTWK_TYPE_TCP || ntwk_type == DB_NTWK_TYPE_UDP || ntwk_type == DB_NTWK_TYPE_CS2) {
                     return DBEVT_REMOTE_DEVICE_CONNECTED;
                 }
-                #endif
             }
             #endif
         } break;
@@ -436,7 +412,6 @@ bk_err_t doorbell_bk_network_transfer_init(char *service_name, void *param)
 
 bk_err_t doorbell_bk_network_transfer_deinit(char *service_name)
 {
-    //db_keepalive_stop_mm_status_check();
     doorbell_network_transfer_stop();
 
     if (strcmp(service_name, "tcp_service") == 0)

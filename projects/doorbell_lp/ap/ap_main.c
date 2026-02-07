@@ -9,16 +9,14 @@
 
 int main(void)
 {
-	bk_init();
+    bk_init();
     media_service_init();
-
-#if (defined(CONFIG_INTEGRATION_DOORBELL) || defined(CONFIG_INTEGRATION_DOORVIEWER))
+    #if (defined(CONFIG_INTEGRATION_DOORBELL) || defined(CONFIG_INTEGRATION_DOORVIEWER))
     bk_smart_config_init();
     doorbell_core_init();
-#endif
+    #endif
 
     db_ipc_wakeup_env_init();
     db_keepalive_handle_wakeup_reason();
-
-	return 0;
+    return 0;
 }
