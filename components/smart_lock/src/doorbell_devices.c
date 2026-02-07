@@ -95,7 +95,7 @@ static avdk_err_t doorbell_lcd_ldo_close(uint8_t ldo_io)
 
 int doorbell_get_supported_camera_devices(int opcode)
 {
-    db_evt_head_t *evt = os_malloc(sizeof(db_evt_head_t) + DEVICE_RESPONSE_SIZE);
+    db_evt_head_t *evt = psram_malloc(sizeof(db_evt_head_t) + DEVICE_RESPONSE_SIZE);
     char *p = (char *)(evt + 1);
 
     evt->opcode = opcode;
@@ -126,7 +126,7 @@ int doorbell_get_supported_lcd_devices(int opcode)
     uint32_t i, size;
     size = get_lcd_devices_num();//media_app_get_lcd_devices_num();
     const lcd_device_t **device = get_lcd_devices_list();//media_app_get_lcd_devices_list();
-    db_evt_head_t *evt = os_malloc(sizeof(db_evt_head_t) + DEVICE_RESPONSE_SIZE);
+    db_evt_head_t *evt = psram_malloc(sizeof(db_evt_head_t) + DEVICE_RESPONSE_SIZE);
     char *p = (char *)(evt + 1);
 
     evt->opcode = opcode;
@@ -171,7 +171,7 @@ int doorbell_get_lcd_status(int opcode)
 {
     uint32_t lcd_status = db_device_info->display_ctlr_handle ? LCD_STATUS_OPEN : LCD_STATUS_CLOSE;
 
-    db_evt_head_t *evt = os_malloc(sizeof(db_evt_head_t) + DEVICE_RESPONSE_SIZE);
+    db_evt_head_t *evt = psram_malloc(sizeof(db_evt_head_t) + DEVICE_RESPONSE_SIZE);
     char *p = (char *)(evt + 1);
 
     evt->opcode = opcode;
