@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 // 30 seconds in milliseconds
-#define MM_STATUS_CHECK_INTERVAL_MS (30 * 1000)
+#define MM_STATUS_CHECK_INTERVAL_MS (10 * 1000)
 
 typedef enum
 {

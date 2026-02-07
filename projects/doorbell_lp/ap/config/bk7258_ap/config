@@ -1134,6 +1134,12 @@ CONFIG_H264_FRAME_SIZE=102400
 # end of Media
 
 #
+# JPEG encoder service
+#
+# CONFIG_JPEG_ENCODER is not set
+# end of JPEG encoder service
+
+#
 # Ota
 #
 CONFIG_OTA_FUNCTION=y
@@ -1209,7 +1215,7 @@ CONFIG_CS2_P2P_SERVER=y
 # CONFIG_CS2_P2P_CLIENT is not set
 # CONFIG_CS2_P2P_TEST is not set
 CONFIG_CS2_TX_BUFFER_THD=262144
-# CONFIG_CS2_MALLOC_USE_PSRAM is not set
+CONFIG_CS2_MALLOC_USE_PSRAM=y
 # CONFIG_CS2_DEBUG_LIB is not set
 # end of cs2p2p
 
