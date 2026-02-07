@@ -24,6 +24,8 @@ bk_err_t doorbell_save_wifi_info_to_flash(doorbell_boarding_info_t *boarding_inf
 bk_err_t doorbell_get_wifi_info_from_flash(db_wifi_connect_info_t *wifi_info);
 bk_err_t doorbell_save_ntwk_service_info_to_flash(db_ntwk_service_info_t *service_info);
 bk_err_t doorbell_get_ntwk_service_info_from_flash(db_ntwk_service_info_t *service_info);
+bk_err_t doorbell_save_keepalive_interval_to_flash(uint32_t interval_ms);
+bk_err_t doorbell_get_keepalive_interval_from_flash(uint32_t *interval_ms);
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
 bk_err_t doorbell_save_server_net_info_to_flash(uint8_t *data);
 bk_err_t doorbell_get_server_net_info_from_flash(ntwk_server_net_info_t *net_info);

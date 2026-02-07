@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#define MM_STATUS_CHECK_INTERVAL_MS (10 * 1000)
+#define MM_STATUS_CHECK_INTERVAL_MS (5 * 1000)
 #define MM_STATUS_CHECK_MIN_INTERVAL_MS (1 * 1000)
 
 
@@ -25,6 +25,7 @@ bk_err_t db_keepalive_start_mm_status_check(void);
 bk_err_t db_keepalive_stop_mm_status_check(void);
 void db_keepalive_update_timestamp(void);
 void db_keepalive_send_keepalive(void);
+int db_keepalive_cli_init(void);
 
 #ifdef __cplusplus
 }

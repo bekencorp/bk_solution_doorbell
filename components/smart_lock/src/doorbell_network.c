@@ -310,3 +310,28 @@ bk_err_t doorbell_get_ntwk_service_info_from_flash(db_ntwk_service_info_t *servi
 
     return BK_OK;
 }
+
+bk_err_t doorbell_save_keepalive_interval_to_flash(uint32_t interval_ms)
+{
+    bk_err_t ret = bk_set_env_enhance("db_keepalive_interval", &interval_ms, sizeof(interval_ms));
+    if (ret != BK_OK) {
+        LOGE("Failed to save keepalive interval to flash\n");
+        return BK_FAIL;
+    }
+    LOGI("Keepalive interval saved to flash: %u ms\n", interval_ms);
+    return BK_OK;
+}
+
+bk_err_t doorbell_get_keepalive_interval_from_flash(uint32_t *interval_ms)
+{
+    if (interval_ms == NULL) {
+        return BK_FAIL;
+    }
+    bk_err_t ret = bk_get_env_enhance("db_keepalive_interval", interval_ms, sizeof(uint32_t));
+    if (ret <= 0) {
+        LOGE("Failed to get keepalive interval from flash\n");
+        return BK_FAIL;
+    }
+    LOGI("Keepalive interval loaded from flash: %u ms\n", *interval_ms);
+    return BK_OK;
+}

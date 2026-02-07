@@ -18,5 +18,6 @@ int main(void)
 
     db_ipc_wakeup_env_init();
     db_keepalive_handle_wakeup_reason();
+    db_keepalive_cli_init();
     return 0;
 }

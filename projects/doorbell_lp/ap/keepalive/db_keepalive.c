@@ -1,4 +1,5 @@
 #include <os/os.h>
+#include <stdlib.h>
 #include <components/log.h>
 #include <common/bk_include.h>
 #include "db_keepalive.h"
@@ -18,12 +19,87 @@
 
 static beken_timer_t s_mm_status_check_timer = {0};
 static bool s_timer_started = false;
+/* Keepalive timer interval in ms, configurable via CLI "ka interval <ms>", persisted to flash */
+static uint32_t s_mm_status_check_interval_ms = MM_STATUS_CHECK_INTERVAL_MS;
+static bool s_interval_loaded_from_flash = false;
 
 static uint64_t s_last_update_timestamp = 0;
 static bool s_pending_keepalive_after_service_stop = false;
 
 static uint32_t s_pending_wakeup_cmd = 0;  // Store the command to send after service starts
 
+#define DB_KEEPALIVE_INTERVAL_MAX_MS (300 * 1000)  /* 5 minutes max */
+
+#define DB_KEEPALIVE_CLI_CMD_CNT (sizeof(s_db_keepalive_commands) / sizeof(struct cli_command))
+
+static void db_keepalive_mm_status_check_timer_handler(void *data);
+
+static void db_set_keepalive_interval(const char *interval_str)
+{
+    uint32_t interval_ms;
+    int err;
+    int val;
+
+    if (interval_str == NULL || interval_str[0] == '\0') {
+        LOGE("%s: interval string is empty\n", __func__);
+        return;
+    }
+
+    val = atoi(interval_str);
+    if (val <= 0) {
+        LOGE("%s: invalid interval: %s (expect positive number, unit: ms)\n", __func__, interval_str);
+        return;
+    }
+
+    interval_ms = (uint32_t)val;
+    if (interval_ms < MM_STATUS_CHECK_MIN_INTERVAL_MS) {
+        LOGW("%s: interval %u ms < min %d ms, use min\n", __func__, interval_ms, MM_STATUS_CHECK_MIN_INTERVAL_MS);
+        interval_ms = MM_STATUS_CHECK_MIN_INTERVAL_MS;
+    }
+    if (interval_ms > DB_KEEPALIVE_INTERVAL_MAX_MS) {
+        LOGW("%s: interval %u ms > max %d ms, use max\n", __func__, interval_ms, DB_KEEPALIVE_INTERVAL_MAX_MS);
+        interval_ms = DB_KEEPALIVE_INTERVAL_MAX_MS;
+    }
+
+    s_mm_status_check_interval_ms = interval_ms;
+    LOGI("%s: keepalive interval set to %u ms\n", __func__, s_mm_status_check_interval_ms);
+
+    if (doorbell_save_keepalive_interval_to_flash(s_mm_status_check_interval_ms) != BK_OK) {
+        LOGW("%s: failed to save interval to flash\n", __func__);
+    }
+
+    /* If timer is running, restart it with new interval */
+    if (s_timer_started) {
+        err = rtos_stop_timer(&s_mm_status_check_timer);
+        if (err != BK_OK) {
+            LOGE("%s: Failed to stop timer\n", __func__);
+            return;
+        }
+        err = rtos_deinit_timer(&s_mm_status_check_timer);
+        if (err != BK_OK) {
+            LOGE("%s: Failed to deinit timer\n", __func__);
+            return;
+        }
+        s_timer_started = false;
+
+        err = rtos_init_timer(&s_mm_status_check_timer,
+                              s_mm_status_check_interval_ms,
+                              db_keepalive_mm_status_check_timer_handler,
+                              NULL);
+        if (err != BK_OK) {
+            LOGE("%s: Failed to re-init timer: %d\n", __func__, err);
+            return;
+        }
+        err = rtos_start_timer(&s_mm_status_check_timer);
+        if (err != BK_OK) {
+            LOGE("%s: Failed to restart timer: %d\n", __func__, err);
+            rtos_deinit_timer(&s_mm_status_check_timer);
+            return;
+        }
+        s_timer_started = true;
+        LOGI("%s: Timer restarted with interval %u ms\n", __func__, s_mm_status_check_interval_ms);
+    }
+}
 
 static bk_err_t db_keepalive_stop_service_if_running(void)
 {
@@ -346,15 +422,27 @@ void db_keepalive_handle_wakeup_reason(void)
 bk_err_t db_keepalive_start_mm_status_check(void)
 {
     int err;
+    uint32_t flash_interval;
 
     if (s_timer_started) {
         LOGW("%s: Timer already started\n", __func__);
         return BK_OK;
     }
 
-    // Initialize timer
+    /* Load interval from flash on first start (after power-on) */
+    if (!s_interval_loaded_from_flash) {
+        s_interval_loaded_from_flash = true;
+        if (doorbell_get_keepalive_interval_from_flash(&flash_interval) == BK_OK &&
+            flash_interval >= MM_STATUS_CHECK_MIN_INTERVAL_MS &&
+            flash_interval <= DB_KEEPALIVE_INTERVAL_MAX_MS) {
+            s_mm_status_check_interval_ms = flash_interval;
+            LOGI("%s: using keepalive interval from flash: %u ms\n", __func__, s_mm_status_check_interval_ms);
+        }
+    }
+
+    // Initialize timer with current interval (from flash or default)
     err = rtos_init_timer(&s_mm_status_check_timer,
-                          MM_STATUS_CHECK_INTERVAL_MS,
+                          s_mm_status_check_interval_ms,
                           db_keepalive_mm_status_check_timer_handler,
                           NULL);
     if (err != BK_OK) {
@@ -371,8 +459,8 @@ bk_err_t db_keepalive_start_mm_status_check(void)
     }
 
     s_timer_started = true;
-    LOGI("%s: Multimedia status check timer started (interval: %d ms)\n", 
-         __func__, MM_STATUS_CHECK_INTERVAL_MS);
+    LOGI("%s: Multimedia status check timer started (interval: %u ms)\n",
+         __func__, s_mm_status_check_interval_ms);
 
     return BK_OK;
 }
@@ -447,4 +535,41 @@ bk_err_t db_keepalive_stop_mm_status_check(void)
     LOGI("%s: Multimedia status check timer stopped\n", __func__);
 
     return BK_OK;
+}
+
+
+static void db_keepalive_cli_help(void)
+{
+    BK_LOG_RAW("ka <arg1> <arg2> ...\r\n");
+    BK_LOG_RAW("-----------------------ka COMMAND---------------------------------\r\n");
+    BK_LOG_RAW("ka                                      - help infomation\r\n");
+    BK_LOG_RAW("ka interval                             - set keepalive interval\r\n");
+}
+
+static void db_keepalive_cli_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, char **argv)
+{
+    if (argc <= 2) {
+        db_keepalive_cli_help();
+        return;
+    }
+
+    if ((os_strcmp(argv[1], "interval") == 0))
+    {
+        LOGI("%s: Setting keepalive interval to %s\n", __func__, argv[2]);
+        db_set_keepalive_interval(argv[2]);
+    }
+    else
+    {
+        LOGW("%s: Unknown command: %s\n", __func__, argv[1]);
+        db_keepalive_cli_help();
+    }
+}
+
+static const struct cli_command s_db_keepalive_commands[] = {
+	{"ka", "ka CLI commands", db_keepalive_cli_cmd},
+};
+
+int db_keepalive_cli_init(void)
+{
+	return cli_register_commands(s_db_keepalive_commands, DB_KEEPALIVE_CLI_CMD_CNT);
 }
