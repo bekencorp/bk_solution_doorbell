@@ -169,6 +169,16 @@ On wake, AP reads `pl_wakeup_env->wakeup_reason`. If `POWERUP_MULTIMEDIA_WAKEUP_
 2. If opcode == `DBCMD_WAKE_UP_REQUEST`, CP calls `pl_wakeup_host(POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG)` to power up AP via CIF and set wake reason.
 3. AP restarts, reads wake reason, stops CP keepalive and resumes multimedia services.
 
+#### 4.4.6 Binding keepalive port to CP port range
+
+This mechanism provides a way to have keepalive-related packets from the peer delivered directly to the **CP-side protocol stack**. When establishing the keepalive TCP connection, the CP side can **bind** the socket to the **CP port range** before calling `connect()`.
+
+**Notes:**
+
+- The CP receive path uses the **destination port** to decide whether uplink data goes to CP or AP: packets whose destination port falls in the **CP local port range** (e.g. `LOCAL_PORT_RANGE_START`–`LOCAL_PORT_RANGE_END`, 0x1000–0x1010) are forwarded to the CP protocol stack.
+- LwIP’s default ephemeral port range is 0xc000–0xffff, which is outside that CP port range, so peer replies may be delivered to the AP-side stack and the CP connection may not close properly.
+- Binding the keepalive socket to a port in the CP port range ensures the connection’s local port is in that range, so peer replies have a destination port in the same range and are delivered to the CP stack, allowing normal connect, receive, and close on the CP side.
+
 ### 4.5 Key technical points
 
 #### 4.5.1 Low-voltage sleep (AP power-down)
