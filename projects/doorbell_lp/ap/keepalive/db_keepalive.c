@@ -355,8 +355,11 @@ void db_keepalive_handle_wakeup_reason(void)
     // Handle different wakeup reasons
     switch (wakeup_reason) {
         case POWERUP_POWER_WAKEUP_FLAG:
-            // Normal power-on startup, no special operation needed
+            // Normal power-on startup, delete previously stored flash info
             LOGI("%s: Normal power-on startup\n", __func__);
+            if (doorbell_del_all_info_from_flash() != BK_OK) {
+                LOGW("%s: Failed to del all info from flash\n", __func__);
+            }
             break;
 
         case POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG:

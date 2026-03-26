@@ -205,6 +205,15 @@ CONFIG_ICU=y
 # end of modules::uart_debug
 
 #
+# bk_download
+#
+# CONFIG_DL_QSPI_ENABLE is not set
+# CONFIG_DL_QSPI_TEST_ENABLE is not set
+CONFIG_DL_QSPI_ID_NUMBER=0
+CONFIG_DL_QSPI_UART_PORT=0
+# end of bk_download
+
+#
 # Httpc
 #
 # CONFIG_HTTPC is not set
@@ -622,8 +631,6 @@ CONFIG_AP_VSIE=y
 # CONFIG_STA_VSIE is not set
 CONFIG_STA_AUTO_RECONNECT=y
 # CONFIG_WPA_LOG is not set
-# CONFIG_WIFI_WPS is not set
-# CONFIG_WPS is not set
 # CONFIG_WPA2_ENTERPRISE is not set
 CONFIG_MOBILE_CONNECT_SAP_STATISTICS=y
 CONFIG_USE_MBEDTLS=y
@@ -1017,6 +1024,14 @@ CONFIG_SPINLOCK_STATIC_CNT=128
 #
 # CONFIG_SLCD is not set
 # end of SLCD
+
+#
+# QSPI
+#
+# CONFIG_QSPI is not set
+# CONFIG_QSPI_STATIS is not set
+CONFIG_QSPI_LINE_MODE=4
+# end of QSPI
 # end of Driver
 
 #

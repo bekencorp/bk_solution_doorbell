@@ -205,6 +205,17 @@ bk_err_t doorbell_get_wifi_info_from_flash(db_wifi_connect_info_t *wifi_info)
     return ret;
 }
 
+bk_err_t doorbell_del_wifi_info_from_flash(void)
+{
+    bk_err_t ret = bk_set_env_enhance("db_wifi_info", NULL, 0);
+    if (ret != BK_OK) {
+        LOGE("Failed to del wifi info from flash\n");
+        return BK_FAIL;
+    }
+    LOGI("Wifi info deleted from flash\n");
+    return BK_OK;
+}
+
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
 bk_err_t doorbell_save_server_net_info_to_flash(uint8_t *data)
 {
@@ -269,6 +280,17 @@ bk_err_t doorbell_get_server_net_info_from_flash(ntwk_server_net_info_t *net_inf
     return BK_OK;
 }
 
+bk_err_t doorbell_del_server_net_info_from_flash(void)
+{
+    bk_err_t ret = bk_set_env_enhance("db_server_net_info", NULL, 0);
+    if (ret != BK_OK) {
+        LOGE("Failed to del server net info from flash\n");
+        return BK_FAIL;
+    }
+    LOGI("Server net info deleted from flash\n");
+    return BK_OK;
+}
+
 #endif
 
 bk_err_t doorbell_save_ntwk_service_info_to_flash(db_ntwk_service_info_t *service_info)
@@ -311,6 +333,17 @@ bk_err_t doorbell_get_ntwk_service_info_from_flash(db_ntwk_service_info_t *servi
     return BK_OK;
 }
 
+bk_err_t doorbell_del_ntwk_service_info_from_flash(void)
+{
+    bk_err_t ret = bk_set_env_enhance("db_ntwk_service_info", NULL, 0);
+    if (ret != BK_OK) {
+        LOGE("Failed to del ntwk service info from flash\n");
+        return BK_FAIL;
+    }
+    LOGI("Network service info deleted from flash\n");
+    return BK_OK;
+}
+
 bk_err_t doorbell_save_keepalive_interval_to_flash(uint32_t interval_ms)
 {
     bk_err_t ret = bk_set_env_enhance("db_keepalive_interval", &interval_ms, sizeof(interval_ms));
@@ -333,5 +366,45 @@ bk_err_t doorbell_get_keepalive_interval_from_flash(uint32_t *interval_ms)
         return BK_FAIL;
     }
     LOGI("Keepalive interval loaded from flash: %u ms\n", *interval_ms);
+    return BK_OK;
+}
+
+bk_err_t doorbell_del_keepalive_interval_from_flash(void)
+{
+    bk_err_t ret = bk_set_env_enhance("db_keepalive_interval", NULL, 0);
+    if (ret != BK_OK) {
+        LOGE("Failed to del keepalive interval from flash\n");
+        return BK_FAIL;
+    }
+    LOGI("Keepalive interval deleted from flash\n");
+    return BK_OK;
+}
+
+bk_err_t doorbell_del_all_info_from_flash(void)
+{
+    bk_err_t ret = BK_OK;
+    ret = doorbell_del_wifi_info_from_flash();
+    if (ret != BK_OK) {
+        LOGE("Failed to del wifi info from flash\n");
+        return BK_FAIL;
+    }
+    ret = doorbell_del_ntwk_service_info_from_flash();
+    if (ret != BK_OK) {
+        LOGE("Failed to del ntwk service info from flash\n");
+        return BK_FAIL;
+    }
+    ret = doorbell_del_keepalive_interval_from_flash();
+    if (ret != BK_OK) {
+        LOGE("Failed to del keepalive interval from flash\n");
+        return BK_FAIL;
+    }
+    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    ret = doorbell_del_server_net_info_from_flash();
+    if (ret != BK_OK) {
+            LOGE("Failed to del server net info from flash\n");
+            return BK_FAIL;
+    }
+    #endif
+
     return BK_OK;
 }
