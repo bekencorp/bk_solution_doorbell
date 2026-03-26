@@ -22,6 +22,16 @@
 
 static db_keepalive_env_t s_keepalive_env = {0};
 
+
+static void db_keepalive_sema_post_safe(void)
+{
+    uint32_t flags = rtos_disable_int();
+    if (s_keepalive_env.sema) {
+        rtos_set_semaphore(&s_keepalive_env.sema);
+    }
+    rtos_enable_int(flags);
+}
+
 // Print packed data content in hex format
 static void db_keepalive_print_packed_data(uint8_t *pack_ptr, uint32_t pack_len)
 {
@@ -205,7 +215,7 @@ static void db_keepalive_rtc_timer_handler(aon_rtc_id_t id, uint8_t *name_p, voi
     if (!s_keepalive_env.keepalive_ongoing) {
         return;
     }
-    rtos_set_semaphore(&s_keepalive_env.sema);
+    db_keepalive_sema_post_safe();
 }
 
 static void db_keepalive_set_keepalive_rtc(void)
@@ -406,9 +416,7 @@ _exit:
     LOGE("%s: RX handler exited\n", __func__);
     /* Wake TX so it runs deinit (we do not run deinit here to avoid LwIP on wrong thread). */
     s_keepalive_env.keepalive_ongoing = false;
-    if (s_keepalive_env.sema) {
-        rtos_set_semaphore(&s_keepalive_env.sema);
-    }
+    db_keepalive_sema_post_safe();
     s_keepalive_env.rx_thread = NULL;
     rtos_delete_thread(NULL);
 }
@@ -613,9 +621,7 @@ bk_err_t db_keepalive_cp_start(void)
 bk_err_t db_keepalive_cp_stop(void)
 {
     s_keepalive_env.keepalive_ongoing = false;
-    if (s_keepalive_env.sema) {
-        rtos_set_semaphore(&s_keepalive_env.sema);
-    }
+    db_keepalive_sema_post_safe();
 
     if (!s_keepalive_env.tx_thread) {
         return db_keepalive_cp_deinit();
@@ -633,9 +639,7 @@ bk_err_t db_keepalive_cp_deinit(void)
     // Stop RTC timer
     db_keepalive_stop_keepalive_rtc();
 
-    if (s_keepalive_env.sema) {
-        rtos_set_semaphore(&s_keepalive_env.sema);
-    }
+    db_keepalive_sema_post_safe();
 
     if (s_keepalive_env.lp_state == PM_MODE_LOW_VOLTAGE) {
         db_keepalive_exit_lv_sleep();
@@ -667,8 +671,12 @@ bk_err_t db_keepalive_cp_deinit(void)
     }
 
     if (s_keepalive_env.sema) {
-        rtos_deinit_semaphore(&s_keepalive_env.sema);
-        s_keepalive_env.sema = NULL;
+        uint32_t flags = rtos_disable_int();
+        if (s_keepalive_env.sema) {
+            rtos_deinit_semaphore(&s_keepalive_env.sema);
+            s_keepalive_env.sema = NULL;
+        }
+        rtos_enable_int(flags);
     }
 
     s_keepalive_env.lp_state = PM_MODE_NORMAL_SLEEP;
