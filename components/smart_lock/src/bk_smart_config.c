@@ -12,6 +12,7 @@
 #define LOGV(...) BK_LOGV(TAG, ##__VA_ARGS__)
 #define STREAM_TO_UINT16(u16, p) {u16 = ((uint16_t)(*(p)) + (((uint16_t)(*((p) + 1))) << 8)); (p) += 2;}
 
+__attribute__((weak)) void db_keepalive_handle_wakeup_reason(void) { }
 
 #define TAG "bk_sconf"
 
@@ -86,6 +87,10 @@ void bk_rx_handle_customer_event(void *data, uint16_t len)
             STREAM_TO_UINT16(opcode, customer_data);
             STREAM_TO_UINT16(length, customer_data);
             doorbell_boarding_operation_handle(opcode, length, customer_data);
+            break;
+        case CIFD_EVENT_KEEPALIVE_DISCONNECTION:
+            LOGD("CIFD_EVENT_KEEPALIVE_DISCONNECTION\n");
+            db_keepalive_handle_wakeup_reason();
             break;
         default:
             LOGD("%s, %d\n", __func__, __LINE__);

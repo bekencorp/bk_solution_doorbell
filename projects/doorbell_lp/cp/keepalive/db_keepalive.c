@@ -21,8 +21,6 @@
 #define LOGV(...)   BK_LOGV(DBK_TAG, ##__VA_ARGS__)
 
 static db_keepalive_env_t s_keepalive_env = {0};
-static bool s_host_powered_down = false;
-static bool s_notify_ap_keepalive_failed = false;
 
 // Print packed data content in hex format
 static void db_keepalive_print_packed_data(uint8_t *pack_ptr, uint32_t pack_len)
@@ -121,8 +119,6 @@ void db_tx_cmd_recive_callback(uint8_t *data, uint16_t length)
         case DBCMD_WAKE_UP_REQUEST:
         {
             LOGI("%s: WAKE_UP_REQUEST\n", __func__);
-            //GPIO_UP(50);
-           // GPIO_DOWN(50);
             pl_wakeup_host(POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG);
         }
         break;
@@ -140,6 +136,10 @@ static bk_err_t db_keepalive_init_connection(void)
     struct sockaddr_in addr;
     uint8_t retry_cnt = 0;
     int ret;
+    struct sockaddr_in local = {0};
+    uint16_t bind_port;
+    uint8_t bind_attempt;
+    static uint32_t s_bind_seed = 0;
 
     while (retry_cnt < DB_KEEPALIVE_MAX_RETRY_CNT) {
         retry_cnt++;
@@ -152,6 +152,30 @@ static bk_err_t db_keepalive_init_connection(void)
         }
 
         db_keepalive_set_socket_timeout(s_keepalive_env.sock, DB_KEEPALIVE_SOCKET_TIMEOUT_MS);
+
+
+        local.sin_family = AF_INET;
+        local.sin_addr.s_addr = INADDR_ANY;
+        for (bind_attempt = 0; bind_attempt < DB_KEEPALIVE_CP_BIND_PORT_COUNT; bind_attempt++) {
+            s_bind_seed = (s_bind_seed * 1103515245u + 12345u) & 0x7fffffffu;
+            bind_port = (uint16_t)(DB_KEEPALIVE_CP_BIND_PORT_START +
+                (s_bind_seed % DB_KEEPALIVE_CP_BIND_PORT_COUNT));
+            local.sin_port = htons(bind_port);
+            ret = bind(s_keepalive_env.sock, (const struct sockaddr *)&local, sizeof(local));
+            if (ret == 0) {
+                break;
+            }
+        }
+        if (ret != 0) {
+            LOGE("%s: Bind in range [%u,%u] failed after %u tries, err=%d\n", __func__,
+                    (unsigned)DB_KEEPALIVE_CP_BIND_PORT_START, (unsigned)DB_KEEPALIVE_CP_BIND_PORT_END,
+                    (unsigned)DB_KEEPALIVE_CP_BIND_PORT_COUNT, errno);
+            closesocket(s_keepalive_env.sock);
+            s_keepalive_env.sock = -1;
+            rtos_delay_milliseconds(1000);
+            continue;
+        }
+        LOGI("%s: Bound to local port %u\n", __func__, (unsigned)bind_port);
 
         addr.sin_family = AF_INET;
         addr.sin_port = htons(s_keepalive_env.port);
@@ -293,9 +317,9 @@ rx_retry:
     if (rx_size <= 0) {
         if (rx_size == 0) {
             LOGI("%s: Connection closed by server\n", __func__);
-            return -1;
+            return -2;
         }
-        
+
         if (errno == EWOULDBLOCK || errno == EAGAIN) {
             rx_retry_cnt++;
             if (rx_retry_cnt > DB_KEEPALIVE_RX_MAX_RETRY_CNT) {
@@ -305,7 +329,7 @@ rx_retry:
             goto rx_retry;
         } else {
             LOGE("%s: RX failed, size=%d, err=%d\n", __func__, rx_size, errno);
-            return -1;
+            return -2;
         }
     }
 
@@ -354,8 +378,14 @@ static void db_keepalive_rx_handler(void *arg)
                                           DB_KEEPALIVE_MSG_BUFFER_SIZE,
                                           &received_len);
         if (ret < 0) {
-            LOGE("%s: Receive raw data failed\n", __func__);
-            goto _exit;
+            if (ret == -1) {
+                LOGE("%s: Receive raw data failed\n", __func__);
+                pl_wakeup_host(POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG);
+                goto _exit;
+            }else {
+                LOGE("%s: Receive raw data failed, ret=%d\n", __func__, ret);
+                goto _exit;
+            }
         }
 
         if (received_len == 0) {
@@ -372,8 +402,15 @@ static void db_keepalive_rx_handler(void *arg)
     }
 
 _exit:
+
     LOGE("%s: RX handler exited\n", __func__);
-    db_keepalive_cp_deinit();
+    /* Wake TX so it runs deinit (we do not run deinit here to avoid LwIP on wrong thread). */
+    s_keepalive_env.keepalive_ongoing = false;
+    if (s_keepalive_env.sema) {
+        rtos_set_semaphore(&s_keepalive_env.sema);
+    }
+    s_keepalive_env.rx_thread = NULL;
+    rtos_delete_thread(NULL);
 }
 
 static bk_err_t db_keepalive_init_rx(void)
@@ -400,16 +437,14 @@ static void db_keepalive_tx_handler(void *arg)
 
     LOGI("%s: TX handler started\n", __func__);
 
-    s_host_powered_down = false;
-    s_notify_ap_keepalive_failed = false;
-
     // Add CIF filter for keepalive server
     cif_filter_add_customer_filter(inet_addr(s_keepalive_env.server), s_keepalive_env.port);
 
     // Initialize connection
     if (db_keepalive_init_connection() != BK_OK) {
         LOGE("%s: Failed to initialize connection\n", __func__);
-        s_notify_ap_keepalive_failed = true;
+        pl_set_wakeup_reason(POWERUP_KEEPALIVE_DISCONNECTION);
+        db_ipc_send_event(DB_IPC_EVENT_KEEPALIVE_DISCONNECTION, NULL, 0);
         goto _exit;
     }
 
@@ -417,13 +452,13 @@ static void db_keepalive_tx_handler(void *arg)
     ret = db_keepalive_init_rx();
     if (ret != BK_OK) {
         LOGE("%s: Failed to init RX\n", __func__);
-        s_notify_ap_keepalive_failed = true;
+        pl_set_wakeup_reason(POWERUP_KEEPALIVE_DISCONNECTION);
+        db_ipc_send_event(DB_IPC_EVENT_KEEPALIVE_DISCONNECTION, NULL, 0);
         goto _exit;
     }
 
     // Power down host
     pl_power_down_host();
-    s_host_powered_down = true;
 
     // Start low voltage sleep
     db_keepalive_start_lv_sleep();
@@ -436,14 +471,14 @@ static void db_keepalive_tx_handler(void *arg)
                           NULL);
     if (ret != BK_OK) {
         LOGE("%s: Failed to init timer\n", __func__);
-        s_notify_ap_keepalive_failed = true;
+        pl_wakeup_host(POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG);
         goto _exit;
     }
 
     ret = rtos_start_timer(&s_keepalive_env.timer);
     if (ret != BK_OK) {
         LOGE("%s: Failed to start timer\n", __func__);
-        s_notify_ap_keepalive_failed = true;
+        pl_wakeup_host(POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG);
         goto _exit;
     }
 
@@ -460,8 +495,12 @@ static void db_keepalive_tx_handler(void *arg)
     while (s_keepalive_env.keepalive_ongoing) {
         // Set RTC timer for next wakeup
         db_keepalive_set_keepalive_rtc();
-        
         ret = rtos_get_semaphore(&s_keepalive_env.sema, BEKEN_WAIT_FOREVER);
+        if (!s_keepalive_env.keepalive_ongoing) {
+            LOGI("%s: Keepalive ongoing, break\n", __func__);
+            break;
+        }
+
         if (ret != BK_OK) {
             LOGW("%s: Get semaphore failed\n", __func__);
             break;
@@ -473,16 +512,9 @@ static void db_keepalive_tx_handler(void *arg)
     }
 
 _exit:
-    if (s_notify_ap_keepalive_failed) {
-        if (s_host_powered_down) {
-            pl_wakeup_host(POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG);
-        } else {
-            pl_set_wakeup_reason(POWERUP_KEEPALIVE_DISCONNECTION);
-            db_ipc_send_event(DB_IPC_EVENT_KEEPALIVE_DISCONNECTION, NULL, 0);
-        }
-    }
     LOGI("%s: TX handler exited\n", __func__);
     db_keepalive_cp_deinit();
+    rtos_delete_thread(NULL);
 }
 
 bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg)
@@ -518,34 +550,20 @@ bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg)
     s_keepalive_env.rx_raw_buffer = (uint8_t *)os_malloc(DB_KEEPALIVE_MSG_BUFFER_SIZE);
     if (s_keepalive_env.rx_raw_buffer == NULL) {
         LOGE("%s: Failed to allocate RX raw buffer\n", __func__);
-        os_free(s_keepalive_env.rx_buffer);
-        s_keepalive_env.rx_buffer = NULL;
-        return BK_FAIL;
+        goto exit;
     }
 
-    // Initialize db_pack module
-    // max_rx_size and max_tx_size should accommodate db_cmd_head_t + payload
     ret = db_pack_init(DB_KEEPALIVE_MSG_BUFFER_SIZE, DB_KEEPALIVE_MSG_BUFFER_SIZE);
     if (ret != BK_OK) {
         LOGE("%s: Failed to init db_pack\n", __func__);
-        os_free(s_keepalive_env.rx_raw_buffer);
-        s_keepalive_env.rx_raw_buffer = NULL;
-        os_free(s_keepalive_env.rx_buffer);
-        s_keepalive_env.rx_buffer = NULL;
-        return BK_FAIL;
+        goto exit;
     }
 
-    // Initialize semaphore
     if (rtos_init_semaphore(&s_keepalive_env.sema, 1) != BK_OK) {
         LOGE("%s: Failed to init semaphore\n", __func__);
         db_pack_deinit();
-        os_free(s_keepalive_env.rx_raw_buffer);
-        s_keepalive_env.rx_raw_buffer = NULL;
-        os_free(s_keepalive_env.rx_buffer);
-        s_keepalive_env.rx_buffer = NULL;
-        return BK_FAIL;
+        goto exit;
     }
-
     s_keepalive_env.keepalive_ongoing = true;
     s_keepalive_env.sock = -1;
     s_keepalive_env.lp_state = PM_MODE_NORMAL_SLEEP;
@@ -553,6 +571,18 @@ bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg)
     LOGI("%s: Initialized, server=%s, port=%d\n", __func__, s_keepalive_env.server, s_keepalive_env.port);
 
     return BK_OK;
+exit:
+    if (s_keepalive_env.rx_raw_buffer) {
+        os_free(s_keepalive_env.rx_raw_buffer);
+        s_keepalive_env.rx_raw_buffer = NULL;
+    }
+
+    if (s_keepalive_env.rx_buffer) {
+        os_free(s_keepalive_env.rx_buffer);
+        s_keepalive_env.rx_buffer = NULL;
+    }
+
+    return BK_FAIL;
 }
 
 bk_err_t db_keepalive_cp_start(void)
@@ -583,7 +613,15 @@ bk_err_t db_keepalive_cp_start(void)
 bk_err_t db_keepalive_cp_stop(void)
 {
     s_keepalive_env.keepalive_ongoing = false;
-    return db_keepalive_cp_deinit();
+    if (s_keepalive_env.sema) {
+        rtos_set_semaphore(&s_keepalive_env.sema);
+    }
+
+    if (!s_keepalive_env.tx_thread) {
+        return db_keepalive_cp_deinit();
+    }
+
+    return BK_OK;
 }
 
 bk_err_t db_keepalive_cp_deinit(void)
@@ -592,13 +630,13 @@ bk_err_t db_keepalive_cp_deinit(void)
 
     s_keepalive_env.keepalive_ongoing = false;
 
-    // Remove CIF filter
-    cif_filter_add_customer_filter(0, 0);
-
     // Stop RTC timer
     db_keepalive_stop_keepalive_rtc();
 
-    // Exit low voltage sleep if in that state
+    if (s_keepalive_env.sema) {
+        rtos_set_semaphore(&s_keepalive_env.sema);
+    }
+
     if (s_keepalive_env.lp_state == PM_MODE_LOW_VOLTAGE) {
         db_keepalive_exit_lv_sleep();
     }
@@ -610,24 +648,11 @@ bk_err_t db_keepalive_cp_deinit(void)
         s_keepalive_env.timer.handle = NULL;
     }
 
-    // Close socket
     if (s_keepalive_env.sock >= 0) {
         closesocket(s_keepalive_env.sock);
         s_keepalive_env.sock = -1;
     }
 
-    // Delete threads
-    if (s_keepalive_env.tx_thread) {
-        rtos_delete_thread(&s_keepalive_env.tx_thread);
-        s_keepalive_env.tx_thread = NULL;
-    }
-
-    if (s_keepalive_env.rx_thread) {
-        rtos_delete_thread(&s_keepalive_env.rx_thread);
-        s_keepalive_env.rx_thread = NULL;
-    }
-
-    // Deinitialize db_pack module
     db_pack_deinit();
 
     // Free resources
@@ -648,6 +673,8 @@ bk_err_t db_keepalive_cp_deinit(void)
 
     s_keepalive_env.lp_state = PM_MODE_NORMAL_SLEEP;
     os_memset(&s_keepalive_env, 0, sizeof(db_keepalive_env_t));
+
+    cif_filter_add_customer_filter(0, 0);
 
     LOGI("%s: Deinitialized\n", __func__);
     return BK_OK;

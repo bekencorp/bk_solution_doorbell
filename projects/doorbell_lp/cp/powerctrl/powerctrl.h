@@ -48,7 +48,7 @@ static __inline__ void pl_reset_wakeup_reason(void)
 static __inline__ void pl_set_wakeup_reason(POWERUP_FLAGS reason)
 {
     os_printf("set wakeup_reason:%x\n", reason);
-    pl_wakeup_env.wakeup_reason |= reason;
+    pl_wakeup_env.wakeup_reason = reason;
 }
 static __inline__ void pl_clear_wakeup_reason(POWERUP_FLAGS reason)
 {

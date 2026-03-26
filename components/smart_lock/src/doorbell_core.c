@@ -280,6 +280,8 @@ static void doorbell_message_handle(void)
                     {
                         ntwk_sdp_start("doorbell-tcp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_TCP_VIDEO_PORT, NTWK_TRANS_TCP_AUDIO_PORT);
                     }
+                    #else
+                    db_info->service = DOORBELL_SERVICE_NONE;
                     #endif
                 }
                 break;
