@@ -1,1 +1,1 @@
-make bk7258 PROJECT=doorbell
+./dbuild.sh make bk7259 PROJECT=doorbell

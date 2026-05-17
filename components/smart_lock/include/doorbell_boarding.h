@@ -1,7 +1,7 @@
 #ifndef __DOORBELL_BOARDING_H__
 #define __DOORBELL_BOARDING_H__
 
-#if CONFIG_BLUETOOTH_HOST_ONLY
+#if CONFIG_BLUETOOTH_HOST_ONLY || CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
 #include "ble_boarding.h"
 #else
 typedef enum
@@ -23,8 +23,6 @@ typedef enum
     BOARDING_OP_NET_PAN_START = 14,
     BOARDING_OP_NETWORK_PROVISIONING_FIRST_TIME = 15,
     BOARDING_OP_START_AGENT_FROM_DEV = 16,
-    BOARDING_OP_SET_SERVER_NET_INFO = 17,
-    BOARDING_OP_CONNECTION_SERVER_FAILED = 18,
 } boarding_opcode_t;
 
 typedef void (*ble_boarding_op_cb_t)(uint16_t opcode, uint16_t length, uint8_t *data);

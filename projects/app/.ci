@@ -1,3 +1,0 @@
-make clean SDK_DIR=~/bk_avdk_smp_main
-make bk7258 SDK_DIR=~/bk_avdk_smp_main
-make bk7257 SDK_DIR=~/bk_avdk_smp_main

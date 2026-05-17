@@ -12,7 +12,7 @@
 #endif
 
 
-#define DB_SAMPLE_RARE_8K (8000)
+#define DB_SAMPLE_RARE_8K  (8000)
 #define DB_SAMPLE_RARE_16K (16000)
 
 /**
@@ -21,9 +21,9 @@
 typedef enum
 {
     CODEC_FORMAT_UNKNOW = 0,
-    CODEC_FORMAT_G711A = 1,
-    CODEC_FORMAT_PCM = 2,
-    CODEC_FORMAT_G711U = 3,
+    CODEC_FORMAT_G711A  = 1,
+    CODEC_FORMAT_PCM    = 2,
+    CODEC_FORMAT_G711U  = 3,
 } codec_format_t;
 
 /**
@@ -33,8 +33,8 @@ typedef struct
 {
     uint8_t aec;
     uint8_t uac;
-    uint8_t rmt_recoder_fmt; /* codec_format_t */
-    uint8_t rmt_player_fmt; /* codec_format_t */
+    uint8_t rmt_recorder_fmt; /* codec_format_t */
+    uint8_t rmt_player_fmt;   /* codec_format_t */
     uint32_t rmt_recorder_sample_rate;
     uint32_t rmt_player_sample_rate;
     uint8_t asr;
@@ -45,12 +45,12 @@ typedef struct
  */
 typedef enum
 {
-    AA_UNKNOWN = 0,
-    AA_ECHO_DEPTH = 1,
+    AA_UNKNOWN       = 0,
+    AA_ECHO_DEPTH    = 1,
     AA_MAX_AMPLITUDE = 2,
     AA_MIN_AMPLITUDE = 3,
-    AA_NOISE_LEVEL = 4,
-    AA_NOISE_PARAM = 5,
+    AA_NOISE_LEVEL   = 4,
+    AA_NOISE_PARAM   = 5,
 } audio_acoustics_t;
 
 /**
@@ -63,6 +63,7 @@ typedef struct
     voice_read_handle_t voice_read_handle;
     voice_write_handle_t voice_write_handle;
 #if (CONFIG_ASR_SERVICE)
+    uint32_t asr_enable;
     asr_handle_t asr_handle;
     aud_asr_handle_t aud_asr_handle;
 #endif

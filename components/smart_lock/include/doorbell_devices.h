@@ -1,11 +1,11 @@
 #ifndef __DOORBELL_DEVICES_H__
 #define __DOORBELL_DEVICES_H__
 
-#include <components/bk_video_pipeline/bk_video_pipeline_types.h>
-#include <components/bk_camera_ctlr.h>
-#include "network_transfer.h"
-#include "components/bk_display.h"
+#include <components/bk_encode/bk_h264_encode_types.h>
+#include <components/bk_decode/bk_jpeg_decode_types.h>
+#include <components/bk_flexa_bond.h>
 
+#include "app_display_types.h"
 
 typedef struct
 {
@@ -15,12 +15,6 @@ typedef struct
     uint16_t format;
     uint16_t protocol;
     uint16_t rotate;
-
-#ifdef CONFIG_STANDARD_DUALSTREAM
-    uint16_t dualstream;
-    uint16_t d_width;
-    uint16_t d_height;
-#endif
 } camera_parameters_t;
 
 typedef struct
@@ -32,13 +26,20 @@ typedef struct
 
 typedef struct
 {
-    uint16_t lcd_id;
+    uint8_t lcd_enable;
+    uint8_t video_enable;
+    uint8_t audio_enable;
+    uint8_t lcd_id;
+    uint16_t camera_id; // UVC_DEVICE_ID, MIPI_DEVICE_ID
+    uint16_t transfer_format;
     const void *lcd_device;
-    bk_video_pipeline_handle_t video_pipeline_handle;
-    bk_display_ctlr_handle_t display_ctlr_handle;
-    camera_type_t cam_type;
-    image_format_t transfer_format;
-    bk_camera_ctlr_handle_t handle;
+    const void *sensor_device;
+    void *h264e_bond;
+    void *gpu_bond;
+    bk_h264_encode_ctlr_handle_t encode_handle;
+    bk_jpeg_decode_ctlr_handle_t decode_handle;
+    bk_gpu_ctlr_handle_t gpu_handle;
+    void *isp_handle;
 } db_device_info_t;
 
 int doorbell_get_supported_camera_devices(int opcode);
@@ -50,7 +51,7 @@ int doorbell_devices_init(void);
 int doorbell_camera_turn_on(camera_parameters_t *parameters);
 int doorbell_camera_turn_off(void);
 
-int doorbell_display_turn_on(display_parameters_t *parameters);
+int doorbell_display_turn_on(display_board_config_t *config);
 int doorbell_display_turn_off(void);
 
 bk_err_t doorbell_devices_start(uint16_t img_format);

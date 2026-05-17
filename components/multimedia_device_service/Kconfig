@@ -1,0 +1,6 @@
+menu "Doorbell Service"
+    config APP_USE_ISP_MP_CHANNEL
+        depends on ISP
+        bool "app layer open isp mp channel default"
+        default y
+endmenu

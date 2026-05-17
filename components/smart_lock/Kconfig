@@ -1,0 +1,13 @@
+menu "Smart Lock"
+
+    config INTEGRATION_DOORBELL
+        bool "Doorbell integration"
+        default n
+
+    config INTEGRATION_DOORBELL_KVS
+        bool "Doorbell + AWS KVS (no BLE provisioning; use bk_network_transfer kvs_service)"
+        default n
+        help
+            Builds doorbell camera/media with kvs_service transport. Enable CONFIG_KVS_NTWK_BRIDGE
+            and KVS/AWS options in the project defconfig.
+endmenu

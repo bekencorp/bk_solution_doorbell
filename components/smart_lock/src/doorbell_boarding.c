@@ -11,6 +11,7 @@
 #include "components/bluetooth/bk_ble.h"
 #include "components/bluetooth/bk_dm_ble.h"
 #include "components/bluetooth/bk_dm_bluetooth.h"
+#include <modules/wdrv_common.h>
 #include "wdrv_cntrl.h"
 #include "wdrv_tx.h"
 
@@ -35,16 +36,11 @@
 
 #define BOARDING_UUID                       (0xFE01)
 
-/* Doorbell version: 1 = v1, 2 = v2, etc. */
-#define DOORBELL_VERSION                       (1)
-#define DOORBELL_LP_VERSION                    (2)
-
 static doorbell_boarding_info_t *doorbell_boarding_info = NULL;
+#ifdef CONFIG_CS2_P2P_SERVER
 static p2p_cs2_key_t *p2p_cs2_key = NULL;
-
-__attribute__((weak)) void db_keepalive_update_timestamp(void) { }
-
-#if !CONFIG_BLUETOOTH_HOST_ONLY
+#endif
+#if !CONFIG_BLUETOOTH_HOST_ONLY && !CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
 static int ble_boarding_notify(uint8_t *data, uint16_t length)
 {
     CIFD_CUST_DATA cust_req = {0};
@@ -79,16 +75,12 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
 {
     LOGD("%s, opcode: %04X, length: %u\n", __func__, opcode, length);
 
-    db_keepalive_update_timestamp();
-
     switch (opcode)
     {
         case BOARDING_OP_STATION_START:
         {
-#if CONFIG_BLUETOOTH_HOST_ONLY
+#if CONFIG_BLUETOOTH_HOST_ONLY || CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
             doorbell_msg_t msg;
-
-            doorbell_save_wifi_info_to_flash(doorbell_boarding_info);
 
             msg.event = DBEVT_WIFI_STATION_CONNECT;
             msg.param = (uint32_t)doorbell_boarding_info;
@@ -130,9 +122,6 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
         case BOARDING_OP_SOFT_AP_START:
         {
             doorbell_msg_t msg;
-
-            doorbell_save_wifi_info_to_flash(doorbell_boarding_info);
-
             msg.event = DBEVT_WIFI_SOFT_AP_TURNING_ON;
             msg.param = (uint32_t)doorbell_boarding_info;
             doorbell_send_msg(&msg);
@@ -159,6 +148,7 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
 
         case BOARDING_OP_SET_CS2_DID:
         {
+#ifdef CONFIG_CS2_P2P_SERVER
             if (p2p_cs2_key == NULL)
             {
                 p2p_cs2_key = os_malloc(sizeof(p2p_cs2_key_t));
@@ -187,13 +177,14 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
             os_memcpy(p2p_cs2_key->did, data, length);
 
             LOGD("did: %s\n", p2p_cs2_key->did);
-
+#endif
             doorbell_boarding_event_message(opcode, BK_OK);
         }
         break;
 
         case BOARDING_OP_SET_CS2_APILICENSE:
         {
+#ifdef CONFIG_CS2_P2P_SERVER
             if (p2p_cs2_key == NULL)
             {
                 p2p_cs2_key = os_malloc(sizeof(p2p_cs2_key_t));
@@ -222,13 +213,14 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
             os_memcpy(p2p_cs2_key->apilicense, data, length);
 
             LOGD("apilicense: %s\n", p2p_cs2_key->apilicense);
-
+#endif
             doorbell_boarding_event_message(opcode, BK_OK);
         }
         break;
 
         case BOARDING_OP_SET_CS2_KEY:
         {
+#ifdef CONFIG_CS2_P2P_SERVER
             if (p2p_cs2_key == NULL)
             {
                 p2p_cs2_key = os_malloc(sizeof(p2p_cs2_key_t));
@@ -257,13 +249,14 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
             os_memcpy(p2p_cs2_key->key, data, length);
 
             LOGD("key: %s\n", p2p_cs2_key->key);
-
+#endif
             doorbell_boarding_event_message(opcode, BK_OK);
         }
         break;
 
         case BOARDING_OP_SET_CS2_INIT_STRING:
         {
+#ifdef CONFIG_CS2_P2P_SERVER
             if (p2p_cs2_key == NULL)
             {
                 p2p_cs2_key = os_malloc(sizeof(p2p_cs2_key_t));
@@ -292,13 +285,14 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
             os_memcpy(p2p_cs2_key->initstring, data, length);
 
             LOGD("initstring: %s\n", p2p_cs2_key->initstring);
-
+#endif
             doorbell_boarding_event_message(opcode, BK_OK);
         }
         break;
 
         case BOARDING_OP_SRRVICE_CS2_START:
         {
+#ifdef CONFIG_CS2_P2P_SERVER
             if (p2p_cs2_key == NULL)
             {
                 LOGE("malloc p2p_cs2_key\n");
@@ -322,6 +316,7 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
             msg.event = DBEVT_P2P_CS2_SERVICE_START_REQUEST;
             msg.param = (uint32_t)p2p_cs2_key;
             doorbell_send_msg(&msg);
+#endif
         }
         break;
 
@@ -340,29 +335,10 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
             LOGD("%s, BOARDING_OP_SET_WIFI_CHANNEL: %u\n", __func__, doorbell_boarding_info->channel);
         }
         break;
-
-        case BOARDING_OP_SET_SERVER_NET_INFO:
-        {
-            LOGD("BOARDING_OP_SET_SERVER_NET_INFO 17\n");
-            #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-            doorbell_save_server_net_info_to_flash(data);
-            doorbell_msg_t msg;
-            msg.event = DBEVT_SET_SERVER_NET_INFO;
-            msg.param = 0;
-            doorbell_send_msg(&msg);
-            #endif
-        }
-        break;
-
-        case BOARDING_OP_CONNECTION_SERVER_FAILED:
-        {
-            LOGD("%s, BOARDING_OP_CONNECTION_SERVER_FAILED 18\n", __func__);
-        }
-        break;
     }
 }
 
-#if CONFIG_BLUETOOTH_HOST_ONLY
+#if CONFIG_BLUETOOTH_HOST_ONLY || CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
 int doorbell_boarding_init(void)
 {
     uint8_t adv_data[ADV_MAX_SIZE] = {0};
@@ -408,12 +384,7 @@ int doorbell_boarding_init(void)
     adv_data[adv_index++] = ADV_TYPE_MANUFACTURER_SPECIFIC;
     adv_data[adv_index++] = BEKEN_COMPANY_ID & 0xFF;
     adv_data[adv_index++] = BEKEN_COMPANY_ID >> 8;
-    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-    adv_data[adv_index++] = DOORBELL_LP_VERSION;
-    #else
-    adv_data[adv_index++] = DOORBELL_VERSION;
-    #endif
-    adv_data[len_index] = 4;  /* type(1) + company_id(2) + version(1) = 4 bytes */
+    adv_data[len_index] = 3;
 
     /*
     LOGD("adv data:\n");
@@ -443,7 +414,7 @@ int doorbell_boarding_init(void)
 
     doorbell_boarding_info->boarding_info.cb = doorbell_boarding_operation_handle;
 
-    ble_boarding_init(&doorbell_boarding_info->boarding_info);
+    ble_boarding_init_ex(&doorbell_boarding_info->boarding_info, 1);
     ble_boarding_adv_start(adv_data, adv_index);
 
     return BK_OK;
