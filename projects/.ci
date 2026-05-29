@@ -1,2 +1,3 @@
 cd doorbell;./dbuild.sh make bk7259
+cd doorbell_lp;./dbuild.sh make bk7259
 cd ipc;./dbuild.sh make bk7259
