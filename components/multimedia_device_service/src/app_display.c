@@ -290,7 +290,6 @@ int app_mipi_lcd_turn_on(display_board_config_t *config)
 {
     int ret = BK_OK;
     display_ctx_t *ctx = NULL;
-    uint32_t clk_src = DPU_CLK_SRC_DPHY_DPLL;
     AVDK_RETURN_ON_FALSE(config, AVDK_ERR_INVAL, TAG, "config is NULL");
 
     if (config->mipi.panel == NULL) {
@@ -331,16 +330,14 @@ int app_mipi_lcd_turn_on(display_board_config_t *config)
     }
 
 #if CONFIG_LCD_LT8912B_MIPI_BRIDGE
-    /* LT8912B HDMI bridge needs its private SW-I2C pins forwarded and runs
-     * on the legacy SYSCLK DPHY timing path (DPU_CLK_SRC_SYSCLK). Plain
-     * MIPI panels stay on the DPHY internal PLL. */
+    /* LT8912B HDMI bridge needs its private SW-I2C pins forwarded so the
+     * bridge IC can be configured before DSI traffic starts. */
     if (config->mipi.panel == &lcd_device_lt8912b_mipi) {
         bk_lcd_lt8912b_io_pins_t pins = {
             .scl_pin = config->mipi.pin_scl,
             .sda_pin = config->mipi.pin_sda,
         };
         BK_LOG_ON_ERR(bk_lcd_lt8912b_set_io_pins(&pins));
-        clk_src = DPU_CLK_SRC_SYSCLK;
     }
 #endif
 
@@ -350,12 +347,12 @@ int app_mipi_lcd_turn_on(display_board_config_t *config)
         LOGE("dsi bus new err: %d\n", ret);
         goto err;
     }
-    bk_display_bus_set_clock_src(ctx->bus, clk_src);
 
-    /* 3. Panel descriptor + first reset / init pulse. */
-    bk_lcd_panel_dev_config_t panel_dev_cfg = {
+
+    bk_lcd_panel_config_t panel_dev_cfg = {
         .reset_pin = config->mipi.pin_reset,
         .reset_active_level = false,
+        .clk_src = DPU_CLK_SRC_DPHY_DPLL,
     };
     ret = bk_lcd_mipi_panel_new(ctx->bus, &panel_dev_cfg,
                                 config->mipi.panel, &ctx->panel);
@@ -374,16 +371,12 @@ int app_mipi_lcd_turn_on(display_board_config_t *config)
         goto err;
     }
 
-    /* 4. DPU controller. Timing comes straight from the panel
-     *    descriptor so the application never has to copy it manually. */
     bk_display_dpu_config_t dpu_cfg = {
-        .clk_src           = clk_src,
-        .timing            = config->mipi.panel->timing,
         .video.enable      = config->dpu_video.enable,
         .video.decompress  = config->dpu_video.decompress,
         .video.format      = config->dpu_video.format,
     };
-    ret = bk_display_dpu_ctlr_new(&ctx->ctlr, &dpu_cfg);
+    ret = bk_display_dpu_ctlr_new(&ctx->ctlr, ctx->panel, &dpu_cfg);
     if (ret != AVDK_ERR_OK) {
         LOGE("dpu ctlr new err: %d\n", ret);
         goto err;
