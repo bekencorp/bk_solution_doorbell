@@ -36,10 +36,21 @@
 
 #define BOARDING_UUID                       (0xFE01)
 
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+/* Doorbell version: 1 = v1, 2 = v2, etc. */
+#define DOORBELL_VERSION                       (1)
+#define DOORBELL_LP_VERSION                    (2)
+#endif
+
 static doorbell_boarding_info_t *doorbell_boarding_info = NULL;
 #ifdef CONFIG_CS2_P2P_SERVER
 static p2p_cs2_key_t *p2p_cs2_key = NULL;
 #endif
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+__attribute__((weak)) void db_keepalive_update_timestamp(void) { }
+#endif
+
 #if !CONFIG_BLUETOOTH_HOST_ONLY && !CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
 static int ble_boarding_notify(uint8_t *data, uint16_t length)
 {
@@ -75,13 +86,19 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
 {
     LOGD("%s, opcode: %04X, length: %u\n", __func__, opcode, length);
 
+    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    db_keepalive_update_timestamp();
+    #endif
+
     switch (opcode)
     {
         case BOARDING_OP_STATION_START:
         {
 #if CONFIG_BLUETOOTH_HOST_ONLY || CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
             doorbell_msg_t msg;
-
+            #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+            doorbell_save_wifi_info_to_flash(doorbell_boarding_info);
+            #endif
             msg.event = DBEVT_WIFI_STATION_CONNECT;
             msg.param = (uint32_t)doorbell_boarding_info;
             doorbell_send_msg(&msg);
@@ -122,6 +139,9 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
         case BOARDING_OP_SOFT_AP_START:
         {
             doorbell_msg_t msg;
+            #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+            doorbell_save_wifi_info_to_flash(doorbell_boarding_info);
+            #endif
             msg.event = DBEVT_WIFI_SOFT_AP_TURNING_ON;
             msg.param = (uint32_t)doorbell_boarding_info;
             doorbell_send_msg(&msg);
@@ -335,6 +355,25 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
             LOGD("%s, BOARDING_OP_SET_WIFI_CHANNEL: %u\n", __func__, doorbell_boarding_info->channel);
         }
         break;
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+        case BOARDING_OP_SET_SERVER_NET_INFO:
+        {
+            LOGD("BOARDING_OP_SET_SERVER_NET_INFO 17\n");
+
+            doorbell_save_server_net_info_to_flash(data);
+            doorbell_msg_t msg;
+            msg.event = DBEVT_SET_SERVER_NET_INFO;
+            msg.param = 0;
+            doorbell_send_msg(&msg);
+
+        }
+        break;
+        case BOARDING_OP_CONNECTION_SERVER_FAILED:
+        {
+            LOGD("%s, BOARDING_OP_CONNECTION_SERVER_FAILED 18\n", __func__);
+        }
+        break;
+#endif
     }
 }
 
@@ -384,7 +423,12 @@ int doorbell_boarding_init(void)
     adv_data[adv_index++] = ADV_TYPE_MANUFACTURER_SPECIFIC;
     adv_data[adv_index++] = BEKEN_COMPANY_ID & 0xFF;
     adv_data[adv_index++] = BEKEN_COMPANY_ID >> 8;
+    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    adv_data[adv_index++] = DOORBELL_LP_VERSION;
+    adv_data[len_index] = 4;  /* type(1) + company_id(2) + version(1) = 4 bytes */
+    #else
     adv_data[len_index] = 3;
+    #endif
 
     /*
     LOGD("adv data:\n");

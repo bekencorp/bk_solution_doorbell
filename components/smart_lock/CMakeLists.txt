@@ -28,7 +28,7 @@ if (CONFIG_VOICE_SERVICE)
 	)
 endif()
 
-set(priv_req media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bt multimedia_device_service bk_peripheral media_service bk_asr_service)
+set(req media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bt multimedia_device_service bk_peripheral media_service bk_asr_service)
 
-armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" PRIV_REQUIRES "${priv_req}"
+armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" REQUIRES "${req}"
 )
