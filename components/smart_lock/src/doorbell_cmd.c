@@ -26,7 +26,7 @@
 #include "network_transfer.h"
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-__attribute__((weak)) void db_keepalive_update_timestamp(void) { }
+#include "doorbell_keepalive.h"
 #endif
 
 #define TAG "db-cmd"
@@ -207,7 +207,7 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 
     LOGD("%s, opcode: %u, param: %u, length: %u\n", __func__, cmd.opcode, cmd.param, cmd.length);
     #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-    db_keepalive_update_timestamp();
+    doorbell_keepalive_update_timestamp();
     #endif
 
     switch (cmd.opcode)
@@ -463,12 +463,16 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
         case DBCMD_GET_SUPPORTED_LCD_DEVICES:
         {
             doorbell_get_supported_lcd_devices(cmd.opcode);
+            #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+            doorbell_keepalive_start_mm_status_check();
+            #endif
         }
         break;
 
         case DBCMD_GET_LCD_STATUS:
         {
             doorbell_get_lcd_status(cmd.opcode);
+
         }
         break;
 

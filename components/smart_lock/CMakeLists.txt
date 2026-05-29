@@ -22,6 +22,13 @@ elseif (CONFIG_INTEGRATION_DOORBELL)
 	)
 endif()
 
+if (CONFIG_INTEGRATION_DOORBELL AND CONFIG_NTWK_CLIENT_SERVICE_ENABLE)
+	list(APPEND srcs
+		src/doorbell_keepalive.c
+		src/doorbell_ipc_msg.c
+	)
+endif()
+
 if (CONFIG_VOICE_SERVICE)
 	list(APPEND srcs
 		src/doorbell_audio_device.c

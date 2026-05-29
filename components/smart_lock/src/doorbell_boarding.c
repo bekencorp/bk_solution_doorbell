@@ -15,6 +15,10 @@
 #include "wdrv_cntrl.h"
 #include "wdrv_tx.h"
 
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+#include "doorbell_keepalive.h"
+#endif
+
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
 #define LOGW(...) BK_LOGW(TAG, ##__VA_ARGS__)
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
@@ -45,10 +49,6 @@
 static doorbell_boarding_info_t *doorbell_boarding_info = NULL;
 #ifdef CONFIG_CS2_P2P_SERVER
 static p2p_cs2_key_t *p2p_cs2_key = NULL;
-#endif
-
-#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-__attribute__((weak)) void db_keepalive_update_timestamp(void) { }
 #endif
 
 #if !CONFIG_BLUETOOTH_HOST_ONLY && !CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
@@ -87,7 +87,7 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
     LOGD("%s, opcode: %04X, length: %u\n", __func__, opcode, length);
 
     #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-    db_keepalive_update_timestamp();
+    doorbell_keepalive_update_timestamp();
     #endif
 
     switch (opcode)

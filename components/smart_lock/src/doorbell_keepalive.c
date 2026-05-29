@@ -2,20 +2,20 @@
 #include <stdlib.h>
 #include <components/log.h>
 #include <common/bk_include.h>
-#include "db_keepalive.h"
-#include "db_ipc_msg/db_ipc_msg.h"
+#include "doorbell_keepalive.h"
+#include "doorbell_ipc_msg.h"
 #include "doorbell_comm.h"
 #include "doorbell_network.h"
 #include "doorbell_cmd.h"
 #include <modules/wdrv_common.h>
 
-#define DB_KEEPALIVE_TAG "DB_KEEPALIVE"
+#define DOORBELL_KEEPALIVE_TAG "DOORBELL_KEEPALIVE"
 
-#define LOGI(...)   BK_LOGI(DB_KEEPALIVE_TAG, ##__VA_ARGS__)
-#define LOGW(...)   BK_LOGW(DB_KEEPALIVE_TAG, ##__VA_ARGS__)
-#define LOGE(...)   BK_LOGE(DB_KEEPALIVE_TAG, ##__VA_ARGS__)
-#define LOGD(...)   BK_LOGD(DB_KEEPALIVE_TAG, ##__VA_ARGS__)
-#define LOGV(...)   BK_LOGV(DB_KEEPALIVE_TAG, ##__VA_ARGS__)
+#define LOGI(...)   BK_LOGI(DOORBELL_KEEPALIVE_TAG, ##__VA_ARGS__)
+#define LOGW(...)   BK_LOGW(DOORBELL_KEEPALIVE_TAG, ##__VA_ARGS__)
+#define LOGE(...)   BK_LOGE(DOORBELL_KEEPALIVE_TAG, ##__VA_ARGS__)
+#define LOGD(...)   BK_LOGD(DOORBELL_KEEPALIVE_TAG, ##__VA_ARGS__)
+#define LOGV(...)   BK_LOGV(DOORBELL_KEEPALIVE_TAG, ##__VA_ARGS__)
 
 static beken_timer_t s_mm_status_check_timer = {0};
 static bool s_timer_started = false;
@@ -28,11 +28,11 @@ static bool s_pending_keepalive_after_service_stop = false;
 
 static uint32_t s_pending_wakeup_cmd = 0;  // Store the command to send after service starts
 
-#define DB_KEEPALIVE_INTERVAL_MAX_MS (300 * 1000)  /* 5 minutes max */
+#define DOORBELL_KEEPALIVE_INTERVAL_MAX_MS (300 * 1000)  /* 5 minutes max */
 
-#define DB_KEEPALIVE_CLI_CMD_CNT (sizeof(s_db_keepalive_commands) / sizeof(struct cli_command))
+#define DOORBELL_KEEPALIVE_CLI_CMD_CNT (sizeof(s_doorbell_keepalive_commands) / sizeof(struct cli_command))
 
-static void db_keepalive_mm_status_check_timer_handler(void *data);
+static void doorbell_keepalive_mm_status_check_timer_handler(void *data);
 
 static void db_set_keepalive_interval(const char *interval_str)
 {
@@ -56,9 +56,9 @@ static void db_set_keepalive_interval(const char *interval_str)
         LOGW("%s: interval %u ms < min %d ms, use min\n", __func__, interval_ms, MM_STATUS_CHECK_MIN_INTERVAL_MS);
         interval_ms = MM_STATUS_CHECK_MIN_INTERVAL_MS;
     }
-    if (interval_ms > DB_KEEPALIVE_INTERVAL_MAX_MS) {
-        LOGW("%s: interval %u ms > max %d ms, use max\n", __func__, interval_ms, DB_KEEPALIVE_INTERVAL_MAX_MS);
-        interval_ms = DB_KEEPALIVE_INTERVAL_MAX_MS;
+    if (interval_ms > DOORBELL_KEEPALIVE_INTERVAL_MAX_MS) {
+        LOGW("%s: interval %u ms > max %d ms, use max\n", __func__, interval_ms, DOORBELL_KEEPALIVE_INTERVAL_MAX_MS);
+        interval_ms = DOORBELL_KEEPALIVE_INTERVAL_MAX_MS;
     }
 
     s_mm_status_check_interval_ms = interval_ms;
@@ -84,7 +84,7 @@ static void db_set_keepalive_interval(const char *interval_str)
 
         err = rtos_init_timer(&s_mm_status_check_timer,
                               s_mm_status_check_interval_ms,
-                              db_keepalive_mm_status_check_timer_handler,
+                              doorbell_keepalive_mm_status_check_timer_handler,
                               NULL);
         if (err != BK_OK) {
             LOGE("%s: Failed to re-init timer: %d\n", __func__, err);
@@ -101,7 +101,7 @@ static void db_set_keepalive_interval(const char *interval_str)
     }
 }
 
-static bk_err_t db_keepalive_stop_service_if_running(void)
+static bk_err_t doorbell_keepalive_stop_service_if_running(void)
 {
     bk_err_t ret;
     db_ntwk_service_info_t service_info;
@@ -153,7 +153,7 @@ static bk_err_t db_keepalive_stop_service_if_running(void)
 }
 
 
-static void db_keepalive_mm_status_check_timer_handler(void *data)
+static void doorbell_keepalive_mm_status_check_timer_handler(void *data)
 {
     uint32_t mm_status;
     bk_err_t ret;
@@ -191,7 +191,7 @@ static void db_keepalive_mm_status_check_timer_handler(void *data)
         LOGI("%s: No active multimedia services, preparing to send keepalive command\n", __func__);
 
         // Try to stop service if it's running (TCP or UDP)
-        ret = db_keepalive_stop_service_if_running();
+        ret = doorbell_keepalive_stop_service_if_running();
         if (ret == BK_OK) {
             // Service stop message was sent, keepalive will be sent after service stops
             return;
@@ -205,7 +205,7 @@ static void db_keepalive_mm_status_check_timer_handler(void *data)
 }
 
 // Encapsulated function: Disable Bluetooth
-static bk_err_t db_keepalive_disable_bluetooth(void)
+static bk_err_t doorbell_keepalive_disable_bluetooth(void)
 {
     doorbell_msg_t msg;
     bk_err_t ret;
@@ -223,7 +223,7 @@ static bk_err_t db_keepalive_disable_bluetooth(void)
 }
 
 // Encapsulated function: Start service based on flash configuration
-static bk_err_t db_keepalive_start_service_from_flash(void)
+static bk_err_t doorbell_keepalive_start_service_from_flash(void)
 {
     bk_err_t ret;
     db_ntwk_service_info_t service_info;
@@ -270,7 +270,7 @@ static bk_err_t db_keepalive_start_service_from_flash(void)
     return BK_OK;
 }
 
-static bk_err_t db_keepalive_send_cmd_to_callback(uint32_t cmd_opcode, uint32_t param, uint16_t length, uint8_t *payload)
+static bk_err_t doorbell_keepalive_send_cmd_to_callback(uint32_t cmd_opcode, uint32_t param, uint16_t length, uint8_t *payload)
 {
     db_cmd_head_t *cmd_ptr;
     uint8_t *send_buf;
@@ -303,20 +303,20 @@ static bk_err_t db_keepalive_send_cmd_to_callback(uint32_t cmd_opcode, uint32_t 
     return BK_OK;
 }
 
-void db_keepalive_on_keepalive_disconnection(void)
+void doorbell_keepalive_on_keepalive_disconnection(void)
 {
     bk_err_t ret;
 
     LOGI("%s: Keepalive establishment failed, re-enabling service\n", __func__);
     s_pending_keepalive_after_service_stop = false;
-    ret = db_keepalive_start_service_from_flash();
+    ret = doorbell_keepalive_start_service_from_flash();
     if (ret != BK_OK) {
         LOGE("%s: Failed to start service from flash\n", __func__);
     }
 }
 
 // Function to handle service start success and send pending command
-void db_keepalive_on_service_start_success(void)
+void doorbell_keepalive_on_service_start_success(void)
 {
     if (s_pending_wakeup_cmd != 0) {
         LOGI("%s: Service started successfully, sending pending command: %u\n", 
@@ -324,7 +324,7 @@ void db_keepalive_on_service_start_success(void)
         
         switch (s_pending_wakeup_cmd) {
             case DBCMD_WAKE_UP_REQUEST:
-                db_keepalive_send_cmd_to_callback(DBCMD_WAKE_UP_REQUEST, 0, 0, NULL);
+                doorbell_keepalive_send_cmd_to_callback(DBCMD_WAKE_UP_REQUEST, 0, 0, NULL);
                 break;
             default:
                 LOGW("%s: Unknown pending command: %u\n", __func__, s_pending_wakeup_cmd);
@@ -335,7 +335,7 @@ void db_keepalive_on_service_start_success(void)
     }
 }
 
-void db_keepalive_handle_wakeup_reason(void)
+void doorbell_keepalive_handle_wakeup_reason(void)
 {
     bk_err_t ret;
     uint32_t wakeup_reason;
@@ -366,21 +366,21 @@ void db_keepalive_handle_wakeup_reason(void)
             LOGI("%s: Wake up request detected\n", __func__);
 
             // 1. Disable Bluetooth
-            ret = db_keepalive_disable_bluetooth();
+            ret = doorbell_keepalive_disable_bluetooth();
             if (ret != BK_OK) {
                 LOGE("%s: Failed to disable Bluetooth\n", __func__);
                 break;
             }
 
             // 2. Stop keepalive service on CP side
-            ret = db_ipc_stop_keepalive();
+            ret = doorbell_ipc_stop_keepalive();
             if (ret != BK_OK) {
                 LOGE("%s: Failed to stop CP keepalive\n", __func__);
                 break;
             }
 
             // 3. Start service from flash
-            ret = db_keepalive_start_service_from_flash();
+            ret = doorbell_keepalive_start_service_from_flash();
             if (ret != BK_OK) {
                 LOGE("%s: Failed to start service from flash\n", __func__);
                 break;
@@ -394,7 +394,7 @@ void db_keepalive_handle_wakeup_reason(void)
 
             LOGI("%s: Keepalive establishment failed, re-enabling service\n", __func__);
             s_pending_keepalive_after_service_stop = false;
-            ret = db_keepalive_start_service_from_flash();
+            ret = doorbell_keepalive_start_service_from_flash();
             if (ret != BK_OK) {
                 LOGE("%s: Failed to start service from flash\n", __func__);
             }
@@ -402,14 +402,14 @@ void db_keepalive_handle_wakeup_reason(void)
 
         case POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG:
             LOGI("%s: Keepalive failure wakeup, disable BT and start service\n", __func__);
-            ret = db_keepalive_disable_bluetooth();
+            ret = doorbell_keepalive_disable_bluetooth();
             if (ret != BK_OK) {
                 LOGE("%s: Failed to disable Bluetooth\n", __func__);
                 break;
             }
 
             s_pending_keepalive_after_service_stop = false;
-            ret = db_keepalive_start_service_from_flash();
+            ret = doorbell_keepalive_start_service_from_flash();
             if (ret != BK_OK) {
                 LOGE("%s: Failed to start service from flash\n", __func__);
             }
@@ -422,7 +422,7 @@ void db_keepalive_handle_wakeup_reason(void)
     }
 }
 
-bk_err_t db_keepalive_start_mm_status_check(void)
+bk_err_t doorbell_keepalive_start_mm_status_check(void)
 {
     int err;
     uint32_t flash_interval;
@@ -437,7 +437,7 @@ bk_err_t db_keepalive_start_mm_status_check(void)
         s_interval_loaded_from_flash = true;
         if (doorbell_get_keepalive_interval_from_flash(&flash_interval) == BK_OK &&
             flash_interval >= MM_STATUS_CHECK_MIN_INTERVAL_MS &&
-            flash_interval <= DB_KEEPALIVE_INTERVAL_MAX_MS) {
+            flash_interval <= DOORBELL_KEEPALIVE_INTERVAL_MAX_MS) {
             s_mm_status_check_interval_ms = flash_interval;
             LOGI("%s: using keepalive interval from flash: %u ms\n", __func__, s_mm_status_check_interval_ms);
         }
@@ -446,7 +446,7 @@ bk_err_t db_keepalive_start_mm_status_check(void)
     // Initialize timer with current interval (from flash or default)
     err = rtos_init_timer(&s_mm_status_check_timer,
                           s_mm_status_check_interval_ms,
-                          db_keepalive_mm_status_check_timer_handler,
+                          doorbell_keepalive_mm_status_check_timer_handler,
                           NULL);
     if (err != BK_OK) {
         LOGE("%s: Failed to init timer: %d\n", __func__, err);
@@ -468,13 +468,13 @@ bk_err_t db_keepalive_start_mm_status_check(void)
     return BK_OK;
 }
 
-void db_keepalive_update_timestamp(void)
+void doorbell_keepalive_update_timestamp(void)
 {
     s_last_update_timestamp = rtos_get_time();
     LOGD("%s: Updated timestamp to %llu ms\n", __func__, (unsigned long long)s_last_update_timestamp);
 }
 
-void db_keepalive_send_keepalive(void)
+void doorbell_keepalive_send_keepalive(void)
 {
     bk_err_t ret = BK_OK;
     ntwk_server_net_info_t net_info;
@@ -503,16 +503,16 @@ void db_keepalive_send_keepalive(void)
     }
 
     // Send keepalive command with IP address and cmd_port
-    ret = db_ipc_start_keepalive((const char *)net_info.ip_addr, (const char *)net_info.cmd_port);
+    ret = doorbell_ipc_start_keepalive((const char *)net_info.ip_addr, (const char *)net_info.cmd_port);
     if (ret != BK_OK) {
         LOGE("%s: Failed to send keepalive command\n", __func__);
         return;
     }
 
-    db_keepalive_stop_mm_status_check();
+    doorbell_keepalive_stop_mm_status_check();
 }
 
-bk_err_t db_keepalive_stop_mm_status_check(void)
+bk_err_t doorbell_keepalive_stop_mm_status_check(void)
 {
     int err;
 
@@ -541,7 +541,7 @@ bk_err_t db_keepalive_stop_mm_status_check(void)
 }
 
 
-static void db_keepalive_cli_help(void)
+static void doorbell_keepalive_cli_help(void)
 {
     BK_LOG_RAW("ka <arg1> <arg2> ...\r\n");
     BK_LOG_RAW("-----------------------ka COMMAND---------------------------------\r\n");
@@ -549,10 +549,10 @@ static void db_keepalive_cli_help(void)
     BK_LOG_RAW("ka interval                             - set keepalive interval\r\n");
 }
 
-static void db_keepalive_cli_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, char **argv)
+static void doorbell_keepalive_cli_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, char **argv)
 {
     if (argc <= 2) {
-        db_keepalive_cli_help();
+        doorbell_keepalive_cli_help();
         return;
     }
 
@@ -564,15 +564,15 @@ static void db_keepalive_cli_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
     else
     {
         LOGW("%s: Unknown command: %s\n", __func__, argv[1]);
-        db_keepalive_cli_help();
+        doorbell_keepalive_cli_help();
     }
 }
 
-static const struct cli_command s_db_keepalive_commands[] = {
-	{"ka", "ka CLI commands", db_keepalive_cli_cmd},
+static const struct cli_command s_doorbell_keepalive_commands[] = {
+	{"ka", "ka CLI commands", doorbell_keepalive_cli_cmd},
 };
 
-int db_keepalive_cli_init(void)
+int doorbell_keepalive_cli_init(void)
 {
-	return cli_register_commands(s_db_keepalive_commands, DB_KEEPALIVE_CLI_CMD_CNT);
+	return cli_register_commands(s_doorbell_keepalive_commands, DOORBELL_KEEPALIVE_CLI_CMD_CNT);
 }

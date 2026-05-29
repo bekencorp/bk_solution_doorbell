@@ -21,9 +21,7 @@
 #include "network_transfer.h"
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-__attribute__((weak)) void db_keepalive_send_keepalive(void) { }
-__attribute__((weak)) void db_keepalive_on_service_start_success(void) { }
-__attribute__((weak)) bk_err_t db_keepalive_start_mm_status_check(void) { return BK_OK; }
+#include "doorbell_keepalive.h"
 #endif
 
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
@@ -261,8 +259,7 @@ static void doorbell_message_handle(void *param)
                         ntwk_sdp_reload(60000);
                     }
                     #else
-                    db_keepalive_on_service_start_success();
-                    db_keepalive_start_mm_status_check();
+                    doorbell_keepalive_on_service_start_success();
                     #endif
                 }
                 break;
@@ -321,7 +318,7 @@ static void doorbell_message_handle(void *param)
                 {
                     LOGD("DBEVT_LAN_TCP_SERVICE_STOP\n");
                     doorbell_bk_network_transfer_deinit("tcp_service");
-                    db_keepalive_send_keepalive();
+                    doorbell_keepalive_send_keepalive();
                 }
                 break;
 
@@ -329,7 +326,7 @@ static void doorbell_message_handle(void *param)
                 {
                     LOGD("DBEVT_LAN_UDP_SERVICE_STOP\n");
                     doorbell_bk_network_transfer_deinit("udp_service");
-                    db_keepalive_send_keepalive();
+                    doorbell_keepalive_send_keepalive();
                 }
                 break;
 #endif

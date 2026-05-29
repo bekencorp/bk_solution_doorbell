@@ -19,8 +19,8 @@
 #endif
 #include <lcd/lcd_mipi_hx8399c_1080x1920.h>
 #include <doorbell_comm.h>
-#include "db_ipc_msg/db_ipc_msg.h"
-#include "keepalive/db_keepalive.h"
+#include "doorbell_ipc_msg.h"
+#include "doorbell_keepalive.h"
 
 int main(void)
 {
@@ -102,8 +102,8 @@ int main(void)
     cli_voice_init();
 #endif
 
-    db_ipc_wakeup_env_init();
-    db_keepalive_handle_wakeup_reason();
-    db_keepalive_cli_init();
+    doorbell_ipc_wakeup_env_init();
+    doorbell_keepalive_handle_wakeup_reason();
+    doorbell_keepalive_cli_init();
     return 0;
 }

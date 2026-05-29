@@ -1,14 +1,6 @@
-set(incs include  .
-        db_ipc_msg
-        keepalive
-)
+set(incs .)
 
 set(srcs ap_main.c )
-
-list(APPEND srcs
-    db_ipc_msg/db_ipc_msg.c
-    keepalive/db_keepalive.c
-)
 
 set(priv_req
     multimedia_device_service
