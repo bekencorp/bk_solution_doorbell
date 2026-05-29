@@ -97,7 +97,7 @@ CONFIG_LITTLEFS_NO_CONFIG_PARTITION=y
 CONFIG_LWIP_MEM_LIBC_MALLOC_USE_PSRAM=y
 CONFIG_MEDIA_SERVICE=y
 CONFIG_CS2_TX_BUFFER_THD=262144
-# CONFIG_DRIVER_TEST is not set
+CONFIG_DRIVER_TEST=y
 # CONFIG_UART_TEST is not set
 
 # CONFIG_PSRAM_CALIBRATE is not set
@@ -128,3 +128,12 @@ CONFIG_MISC_AT_ENABLE=y
 CONFIG_AT_MAX_PORT_CNT=1
 
 CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER=460800
+
+# AP heartbeat-timeout / bus-stall forensics:
+#   deepen IRQ recorder to ~3.5s window and record AON IRQ-silence windows.
+#   ~24 KB extra BSS per AP (only enabled for the doorbell solution project; SoC
+#   default stays at 40 entries so small-RAM projects like test/cpu_perf_test
+#   still fit).
+CONFIG_INTERRUPT_DEBUG_RECORDER=y
+CONFIG_INTERRUPT_RECORDER_CNT=512
+CONFIG_INTERRUPT_GAP_DETECT_US=50000
