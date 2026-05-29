@@ -301,6 +301,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             }
 #endif
 
+#if (CONFIG_ASR_SERVICE_WITH_MIC)
+            extern int doorbell_asr_turn_off(void);
+            doorbell_asr_turn_off();
+#endif
+
             int ret = doorbell_camera_turn_on(&parameters);
             if (ret != BK_OK)
             {
@@ -340,6 +345,12 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             #endif
 
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+
+#if (CONFIG_ASR_SERVICE_WITH_MIC)
+            extern int doorbell_asr_turn_on(void);
+            doorbell_asr_turn_on();
+#endif
+
         }
         break;
 
