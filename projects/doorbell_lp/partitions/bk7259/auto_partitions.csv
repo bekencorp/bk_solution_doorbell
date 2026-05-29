@@ -3,7 +3,7 @@
 FLASH_CAPACITY=8M
 #Name,Offset,Size,Type,Read,Write
 #primary_bootloader,,68k,code,TRUE,FALSE
-primary_cp_app,,1224k,code,TRUE,FALSE
+primary_cp_app,,1360k,code,TRUE,FALSE
 primary_ap_app,,2040k,code,TRUE,FALSE
 ota,,2040K,data,TRUE,TRUE
 usr_config,,60K,data,TRUE,TRUE

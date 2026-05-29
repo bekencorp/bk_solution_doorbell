@@ -458,8 +458,19 @@ int doorbell_boarding_init(void)
 
     doorbell_boarding_info->boarding_info.cb = doorbell_boarding_operation_handle;
 
-    ble_boarding_init_ex(&doorbell_boarding_info->boarding_info, 1);
-    ble_boarding_adv_start(adv_data, adv_index);
+#if CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
+    if (bk_pm_ap_first_boot_get())
+    {
+#endif
+        ble_boarding_init_ex(&doorbell_boarding_info->boarding_info, 1);
+        ble_boarding_adv_start(adv_data, adv_index);
+#if CONFIG_BLUETOOTH_SUPPORT_AP_PWD_ALL
+    }
+    else
+    {
+        ble_boarding_init_ex(&doorbell_boarding_info->boarding_info, 0);
+    }
+#endif
 
     return BK_OK;
 error:
