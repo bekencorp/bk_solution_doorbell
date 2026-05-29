@@ -32,9 +32,9 @@ int main(void)
     camera_board.mipi.pin_reset = GPIO_71;
     camera_board.mipi.pin_pwdn = -1;
     camera_board.mipi.pin_xclk = GPIO_59;
-    camera_board.mipi.sensor_max_width = 1920;
-    camera_board.mipi.sensor_max_height = 1080;
-    camera_board.mipi.sensor_fps = 25;
+    camera_board.mipi.sensor_max_width = 2304;
+    camera_board.mipi.sensor_max_height = 1296;
+    camera_board.mipi.sensor_fps = 20;
     camera_board.isp.mp_enable = true;
     camera_board.isp.mp_flexa = true;
     camera_board.isp.mp_width = 1920;
