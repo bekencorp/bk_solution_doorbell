@@ -222,6 +222,29 @@ int app_isp_dvp_camera_turn_on(camera_parameters_ext_t *paramters)
     AVDK_RETURN_ON_FALSE(sensor_object, ret, TAG, "sensor object is NULL");
     isp_ctlr_config.sensor_object = sensor_object;
 
+    /* Pull sensor's native output pixel format from its supported-format table
+     * (declared per-device in xxx_format_array[]); the macro no longer sets it.
+     * Prefer the entry matching the requested (w,h,fps); fall back to [0]. */
+    {
+        bk_camera_sensor_format_array_t format_array = {0};
+        if (bk_camera_sensor_query_support_formats(isp_cam_handle.sensor_handle, &format_array) == AVDK_ERR_OK
+            && format_array.size > 0)
+        {
+            uint32_t i;
+            isp_ctlr_config.input_pixel_fmt = format_array.format_array[0].output_pixel_fmt;
+            for (i = 0; i < format_array.size; i++)
+            {
+                if (format_array.format_array[i].width  == paramters->camera_width
+                    && format_array.format_array[i].height == paramters->camera_height
+                    && format_array.format_array[i].fps    == paramters->fps)
+                {
+                    isp_ctlr_config.input_pixel_fmt = format_array.format_array[i].output_pixel_fmt;
+                    break;
+                }
+            }
+        }
+    }
+
     // step 3: new/init camera
     AVDK_RETURN_ON_ERROR(bk_camera_isp_ctlr_new(&isp_cam_handle.camera_ctlr_handle), TAG, "bk_camera_isp_ctlr_new failed");
     bk_camera_isp_ctlr_t *control =  __containerof(isp_cam_handle.camera_ctlr_handle, bk_camera_isp_ctlr_t, ops);
@@ -329,6 +352,10 @@ int app_isp_mipi_sensor_init(const camera_board_config_t *config, bk_isp_camera_
         format_array.format_array[detect_index].width,
         format_array.format_array[detect_index].height,
         format_array.format_array[detect_index].fps);
+
+    /* Pixel format is a property of the matched sensor mode; copy it back into
+     * isp_ctlr_config so the ISP port is configured for the correct raw type. */
+    isp_ctlr_config->input_pixel_fmt = format_array.format_array[detect_index].output_pixel_fmt;
 
     const void *sensor_object = bk_camera_sensor_get_sensor_object(isp_cam_handle.sensor_handle);
     AVDK_GOTO_ON_FALSE(sensor_object, AVDK_ERR_GENERIC, err, TAG, "sensor object is NULL");
@@ -499,6 +526,44 @@ int app_isp_dual_camera_turn_on(camera_parameters_ext_t *paramters)
     isp_ctlr_dvp_config.sensor_object = dvp_sensor_object;
     isp_ctlr_mipi_config.sensor_object = mipi_sensor_object;
 
+    /* Pull each sensor's native output pixel format from its supported-format
+     * table; prefer the entry matching the requested (w,h,fps), fall back to
+     * [0] if no exact mode is declared. */
+    {
+        bk_camera_sensor_format_array_t dvp_fmt_arr = {0};
+        bk_camera_sensor_format_array_t mipi_fmt_arr = {0};
+        uint32_t i;
+        if (bk_camera_sensor_query_support_formats(isp_cam_handle.dvp_sensor_handle, &dvp_fmt_arr) == AVDK_ERR_OK
+            && dvp_fmt_arr.size > 0)
+        {
+            isp_ctlr_dvp_config.input_pixel_fmt = dvp_fmt_arr.format_array[0].output_pixel_fmt;
+            for (i = 0; i < dvp_fmt_arr.size; i++)
+            {
+                if (dvp_fmt_arr.format_array[i].width  == paramters->camera_width
+                    && dvp_fmt_arr.format_array[i].height == paramters->camera_height
+                    && dvp_fmt_arr.format_array[i].fps    == paramters->fps)
+                {
+                    isp_ctlr_dvp_config.input_pixel_fmt = dvp_fmt_arr.format_array[i].output_pixel_fmt;
+                    break;
+                }
+            }
+        }
+        if (bk_camera_sensor_query_support_formats(isp_cam_handle.mipi_sensor_handle, &mipi_fmt_arr) == AVDK_ERR_OK
+            && mipi_fmt_arr.size > 0)
+        {
+            isp_ctlr_mipi_config.input_pixel_fmt = mipi_fmt_arr.format_array[0].output_pixel_fmt;
+            for (i = 0; i < mipi_fmt_arr.size; i++)
+            {
+                if (mipi_fmt_arr.format_array[i].width  == param_temp.camera_width
+                    && mipi_fmt_arr.format_array[i].height == param_temp.camera_height
+                    && mipi_fmt_arr.format_array[i].fps    == paramters->fps)
+                {
+                    isp_ctlr_mipi_config.input_pixel_fmt = mipi_fmt_arr.format_array[i].output_pixel_fmt;
+                    break;
+                }
+            }
+        }
+    }
 
     // step 3: new/init camera device
     AVDK_GOTO_ON_ERROR(bk_camera_isp_ctlr_new(&isp_cam_handle.camera_ctlr_handle), err, TAG, "bk_camera_isp_ctlr_new failed");
