@@ -123,20 +123,16 @@ void bk_audio_engine_asr_result_handle(void *p1, void *p2)
 }
 
 #if CONFIG_BEKEN_KWS
-static int bk_tflite_asr_init(void)
-{
-    bk_kws_init(NULL);
-    return 1;
-}
-
-static int bk_tflite_asr_recog(void *read_buf, uint32_t read_size, void *p1, void *p2)
+static int bk_doorbell_asr_recog(void *read_buf, uint32_t read_size, void *p1, void *p2)
 {
     int16_t result = 0;
-    if (g_recog_en)
-        bk_tflite_ASR_Recog((short*)read_buf, read_size, p1, p2, &result);
-    else
+
+    if (g_recog_en) {
+        result = bk_tflite_asr_recog((short *)read_buf, read_size, p1, p2);
+    } else {
         result = 1;
-    //LOGD("%s , %d\n", g_audio_engine_asr_text, result);
+    }
+
     return result;
 }
 #endif
@@ -297,8 +293,8 @@ int doorbell_asr_turn_on(void)
             aud_asr_cfg.aud_asr_result_handle = bk_audio_engine_asr_result_handle;
         #if CONFIG_BEKEN_KWS
             aud_asr_cfg.aud_asr_init   = bk_tflite_asr_init;
-            aud_asr_cfg.aud_asr_deinit = NULL;
-            aud_asr_cfg.aud_asr_recog  = bk_tflite_asr_recog;
+            aud_asr_cfg.aud_asr_deinit = bk_tflite_asr_deinit;
+            aud_asr_cfg.aud_asr_recog  = bk_doorbell_asr_recog;
             aud_asr_cfg.max_read_size  = 1280;
             aud_asr_cfg.task_stack     = 25 * 1024;
             aud_asr_cfg.mem_type       = AUDIO_MEM_TYPE_PSRAM;
