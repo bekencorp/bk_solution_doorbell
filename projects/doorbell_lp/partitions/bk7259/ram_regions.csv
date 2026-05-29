@@ -2,8 +2,9 @@
 # SRAM base addr is 0x28000000, capacity is 1280K
 # PSRAM base addr is 0x60000000
 #Name,                   Type,     Offset,     Size
-CP_RAM,                  SRAM, 0x28000000, 0x05F000
+CP_RAM,                  SRAM, 0x28000000, 0x05C800
 SWAP,                    SRAM,           , 0x001000
+LOWPOWER,                SRAM,           , 0X002800
 AP_HSRAM_HEAP,           SRAM, 0x28100000, 0x080000
 AP_RAM,                  SRAM,           , 0x060000
 PSRAM_MEM_SLAB_UNCODED, PSRAM, 0x60000000, 0x1000000
