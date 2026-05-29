@@ -27,8 +27,11 @@
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
 #define LOGD(...) BK_LOGD(TAG, ##__VA_ARGS__)
 
-#define MAX_QUE_LEN (20)//5 is too small, 10 is enough
-#define FRAME_SIZE  (1024 * 200)//500K is too large, 200K is enough
+#define MAX_QUE_LEN (8)//5 is too small, 10 is enough
+#ifndef CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER
+#define CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER (1024 * 200)
+#endif
+#define FRAME_SIZE  (CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER)
 typedef struct
 {
     uint32_t param;
