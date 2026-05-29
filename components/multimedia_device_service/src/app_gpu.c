@@ -128,13 +128,11 @@ avdk_err_t app_gpu_turn_on(gpu_board_config_t *config)
     gpu_config.flexa_lines = 16;
     gpu_config.flexa_buff_cnt = isp_control->chn[APP_ISP_MP_CHN_ID].buf_cnt;
     gpu_config.flexa = true;
-    gpu_config.malloc = app_gpu_frame_malloc;
-    gpu_config.free = app_gpu_frame_free;
-    gpu_config.frame_display = app_gpu_frame_complete;
-    gpu_config.frame_display_args = NULL;
+    gpu_config.frame_malloc = app_gpu_frame_malloc;
+    gpu_config.frame_free = app_gpu_frame_free;
     gpu_config.flexa_line_done = NULL;
     gpu_config.flexa_line_done_args = NULL;
-    gpu_config.frame_done = NULL;
+    gpu_config.frame_done = app_gpu_frame_complete;
     gpu_config.frame_done_args = NULL;
 
     avdk_err_t ret = bk_gpu_ctlr_new(&s_gpu_handle, &gpu_config);
@@ -216,10 +214,6 @@ static void flexa_line_done_cb(uint32_t done_lines, void *arg)
 {
 }
 
-static void frame_done_cb(void *frame, uint32_t frame_size, void *args)
-{
-}
-
 avdk_err_t app_gpu_v2_turn_on(uint16_t width, uint16_t height)
 {
     avdk_err_t ret = AVDK_ERR_OK;
@@ -255,10 +249,8 @@ avdk_err_t app_gpu_v2_turn_on(uint16_t width, uint16_t height)
     gpu_config.dst_format = BK_PIXEL_FORMAT_ARGB8888;
     gpu_config.compress = display_board->dpu_video.decompress;
     gpu_config.scale = gpu_board->flexa.scale;
-    gpu_config.malloc = app_gpu_frame_malloc;
-    gpu_config.free = app_gpu_frame_free;
-    gpu_config.frame_display = app_gpu_frame_complete;
-    gpu_config.frame_display_args = NULL;
+    gpu_config.frame_malloc = app_gpu_frame_malloc;
+    gpu_config.frame_free = app_gpu_frame_free;
 
     uint8_t *decode_buffer = NULL;
     uint8_t decode_buf_cnt = 0;
@@ -278,7 +270,7 @@ avdk_err_t app_gpu_v2_turn_on(uint16_t width, uint16_t height)
     gpu_config.flexa_buff_cnt = decode_buf_cnt;
     gpu_config.flexa_line_done = flexa_line_done_cb;
     gpu_config.flexa_line_done_args = NULL;
-    gpu_config.frame_done = frame_done_cb;
+    gpu_config.frame_done = app_gpu_frame_complete;
     gpu_config.frame_done_args = NULL;
 
     AVDK_RETURN_ON_FALSE((s_gpu_handle == NULL), AVDK_ERR_BUSY, TAG, "already turned on");
