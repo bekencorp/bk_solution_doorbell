@@ -1,1 +1,0 @@
-cd doorbell;./dbuild.sh make bk7259 PROJECT=doorbell
