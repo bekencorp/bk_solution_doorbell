@@ -145,8 +145,7 @@ static void app_display_teardown(display_ctx_t *ctx)
     }
 
     if (ctx->panel) {
-        bk_lcd_panel_reset(ctx->panel);
-        (void)bk_lcd_panel_del(ctx->panel);
+        (void)bk_lcd_panel_delete(ctx->panel);
         ctx->panel = NULL;
     }
 
@@ -351,23 +350,11 @@ int app_mipi_lcd_turn_on(display_board_config_t *config)
 
     bk_lcd_panel_config_t panel_dev_cfg = {
         .reset_pin = config->mipi.pin_reset,
-        .reset_active_level = false,
-        .clk_src = DPU_CLK_SRC_DPHY_DPLL,
     };
     ret = bk_lcd_mipi_panel_new(ctx->bus, &panel_dev_cfg,
                                 config->mipi.panel, &ctx->panel);
     if (ret != AVDK_ERR_OK) {
         LOGE("mipi panel new err: %d\n", ret);
-        goto err;
-    }
-    ret = bk_lcd_panel_reset(ctx->panel);
-    if (ret != AVDK_ERR_OK) {
-        LOGE("panel reset err: %d\n", ret);
-        goto err;
-    }
-    ret = bk_lcd_panel_init(ctx->panel);
-    if (ret != AVDK_ERR_OK) {
-        LOGE("panel init err: %d\n", ret);
         goto err;
     }
 
