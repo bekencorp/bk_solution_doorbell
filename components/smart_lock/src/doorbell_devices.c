@@ -127,6 +127,153 @@ int doorbell_get_lcd_status(int opcode)
     return 0;
 }
 
+static int gpu_pipeline_attach(db_device_info_t *info)
+{
+    int ret;
+
+    if (info == NULL)
+    {
+        return BK_FAIL;
+    }
+    if (info->gpu_handle != NULL)
+    {
+        return BK_OK;
+    }
+
+    display_source_t *src = devices_mgmt_get_display_source();
+    if (src == NULL)
+    {
+        LOGE("%s, display_source not found\n", __func__);
+        return BK_FAIL;
+    }
+
+    if (src->id == DISPLAY_STREAM_ID_MIPI_CSI)
+    {
+        if (info->isp_handle == NULL)
+        {
+            LOGE("%s, isp_handle is NULL\n", __func__);
+            return BK_FAIL;
+        }
+
+        ret = app_gpu_turn_on(app_gpu_board_config_get());
+        if (ret != BK_OK)
+        {
+            LOGE("%s, app_gpu_turn_on failed, ret = %d\n", __func__, ret);
+            return ret;
+        }
+
+        info->gpu_handle = app_gpu_handle_get();
+        if (info->gpu_handle == NULL)
+        {
+            LOGE("%s, app_gpu_handle_get failed\n", __func__);
+            return BK_FAIL;
+        }
+
+        ret = bk_flexa_isp_gpu_bond_start(&info->gpu_bond, info->isp_handle, info->gpu_handle);
+        if (ret != BK_OK)
+        {
+            LOGE("%s, bk_flexa_isp_gpu_bond_start failed, ret = %d\n", __func__, ret);
+            (void)app_gpu_turn_off(info->gpu_handle);
+            info->gpu_handle = NULL;
+            return ret;
+        }
+    }
+    else
+    {
+#ifdef CONFIG_USB_CAMERA
+        if (info->decode_handle == NULL)
+        {
+            LOGE("%s, decode_handle is NULL\n", __func__);
+            return BK_FAIL;
+        }
+
+        app_uvc_device_t *uvc_device = devices_mgmt_get_uvc_device(0);
+        if (uvc_device == NULL)
+        {
+            LOGE("%s, uvc_device not found\n", __func__);
+            return BK_FAIL;
+        }
+
+        display_board_config_t *display_board = app_display_board_config_get();
+        if (display_board != NULL && display_board->mipi.panel != NULL)
+        {
+            gpu_board_config_t *gpu_board = app_gpu_board_config_get();
+            if (gpu_board != NULL &&
+                (uvc_device->width != display_board->mipi.panel->timing.h_size ||
+                 uvc_device->height != display_board->mipi.panel->timing.v_size))
+            {
+                gpu_board->flexa.scale = true;
+            }
+        }
+
+        ret = app_gpu_v2_turn_on(uvc_device->width, uvc_device->height);
+        if (ret != BK_OK)
+        {
+            LOGE("%s, app_gpu_v2_turn_on failed, ret = %d\n", __func__, ret);
+            return ret;
+        }
+
+        info->gpu_handle = app_gpu_handle_get();
+        if (info->gpu_handle == NULL)
+        {
+            LOGE("%s, app_gpu_handle_get failed\n", __func__);
+            return BK_FAIL;
+        }
+
+        ret = bk_flexa_mjpegd_gpu_bond_start(&info->gpu_bond, info->decode_handle, info->gpu_handle);
+        if (ret != BK_OK)
+        {
+            LOGE("%s, bk_flexa_mjpegd_gpu_bond_start failed, ret = %d\n", __func__, ret);
+            (void)app_gpu_turn_off(info->gpu_handle);
+            info->gpu_handle = NULL;
+            return ret;
+        }
+#else
+        LOGE("%s, UVC source but CONFIG_USB_CAMERA not enabled\n", __func__);
+        return BK_FAIL;
+#endif
+    }
+
+    return BK_OK;
+}
+
+static int gpu_pipeline_detach(db_device_info_t *info)
+{
+    if (info == NULL)
+    {
+        LOGE("%s, info is NULL\n", __func__);
+        return BK_FAIL;
+    }
+
+    if (info->gpu_bond != NULL)
+    {
+        display_source_t *src = devices_mgmt_get_display_source();
+        if (src != NULL && src->id == DISPLAY_STREAM_ID_MIPI_CSI)
+        {
+            bk_flexa_isp_gpu_bond_stop(info->gpu_bond);
+        }
+        else
+        {
+#ifdef CONFIG_USB_CAMERA
+            bk_flexa_mjpegd_gpu_bond_stop(info->gpu_bond);
+#endif
+        }
+        info->gpu_bond = NULL;
+    }
+
+    if (info->gpu_handle != NULL)
+    {
+        avdk_err_t off_ret = app_gpu_turn_off(info->gpu_handle);
+        if (off_ret != BK_OK)
+        {
+            LOGE("%s, app_gpu_turn_off failed, ret = %d\n", __func__, off_ret);
+        }
+        info->gpu_handle = NULL;
+    }
+
+    return BK_OK;
+}
+
 int doorbell_camera_turn_on(camera_parameters_t *parameters)
 {
     bk_err_t ret = BK_FAIL;
@@ -208,10 +355,10 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
             goto err;
         }
 
-        if (info->gpu_handle != NULL) {
-            ret = bk_flexa_mjpegd_gpu_bond_start(&info->gpu_bond, info->decode_handle, info->gpu_handle);
+        if (info->lcd_enable) {
+            ret = gpu_pipeline_attach(info);
             if (ret != BK_OK) {
-                LOGE("%s, bk_flexa_mjpegd_gpu_bond_start failed, ret = %d\n", __func__, ret);
+                LOGE("%s, gpu_pipeline_attach failed, ret = %d\n", __func__, ret);
                 goto err;
             }
         }
@@ -261,10 +408,10 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
             goto err;
         }
 
-        if (info->gpu_handle != NULL) {
-            ret = bk_flexa_isp_gpu_bond_start(&info->gpu_bond, info->isp_handle, info->gpu_handle);
+        if (info->lcd_enable) {
+            ret = gpu_pipeline_attach(info);
             if (ret != BK_OK) {
-                LOGE("%s, bk_flexa_isp_gpu_bond_start failed, ret = %d\n", __func__, ret);
+                LOGE("%s, gpu_pipeline_attach failed, ret = %d\n", __func__, ret);
                 goto err;
             }
         }
@@ -301,14 +448,11 @@ int doorbell_camera_turn_off(void)
     if (info->camera_id == UVC_DEVICE_ID)
     {
 #ifdef CONFIG_USB_CAMERA
+        gpu_pipeline_detach(info);
+
         if (info->h264e_bond != NULL) {
             bk_flexa_mjpegd_h264e_bond_stop(info->h264e_bond);
             info->h264e_bond = NULL;
-        }
-
-        if (info->gpu_bond != NULL) {
-            bk_flexa_mjpegd_gpu_bond_stop(info->gpu_bond);
-            info->gpu_bond = NULL;
         }
 
         ret = app_uvc_turn_off(1);//default port id is 1
@@ -335,10 +479,7 @@ int doorbell_camera_turn_off(void)
     }
     else
     {
-        if(info->gpu_handle != NULL) {
-            bk_flexa_isp_gpu_bond_stop(info->gpu_bond);
-            info->gpu_bond = NULL;
-        }
+        gpu_pipeline_detach(info);
 
         bk_flexa_isp_h264e_bond_stop(info->h264e_bond);
 
@@ -426,54 +567,6 @@ int doorbell_video_transfer_turn_off(void)
     return ret;
 }
 
-static int doorbell_display_gpu_stop(db_device_info_t *info, display_source_t *display_source)
-{
-    int ret = BK_OK;
-
-    if (info == NULL)
-    {
-        LOGE("%s, info is NULL\n", __func__);
-        return BK_FAIL;
-    }
-
-    if (display_source == NULL)
-    {
-        LOGE("%s, display_source not found\n", __func__);
-        return BK_FAIL;
-    }
-
-    if (display_source->id == DISPLAY_STREAM_ID_MIPI_CSI)
-    {
-        if (info->gpu_bond != NULL)
-        {
-            bk_flexa_isp_gpu_bond_stop(info->gpu_bond);
-            info->gpu_bond = NULL;
-        }
-    }
-    else
-    {
-        if (info->gpu_bond != NULL)
-        {
-            bk_flexa_mjpegd_gpu_bond_stop(info->gpu_bond);
-            info->gpu_bond = NULL;
-        }
-    }
-
-    if (info->gpu_handle != NULL)
-    {
-        ret = app_gpu_turn_off(info->gpu_handle);
-        if (ret != BK_OK)
-        {
-            LOGE("%s, app_gpu_turn_off failed, ret = %d\n", __func__, ret);
-            return ret;
-        }
-        info->gpu_handle = NULL;
-    }
-
-    info->isp_handle = NULL;
-    return BK_OK;
-}
-
 int doorbell_display_turn_on(display_board_config_t *config)
 {
     int ret = BK_FAIL;
@@ -508,74 +601,20 @@ int doorbell_display_turn_on(display_board_config_t *config)
         return ret;
     }
 
-    if (display_source->id == DISPLAY_STREAM_ID_PORT_0_UVC)
-    {
-        app_uvc_device_t *uvc_device = devices_mgmt_get_uvc_device(0);
-        if (uvc_device == NULL)
-        {
-            LOGE("%s, uvc_device not found\n", __func__);
-            goto error;
-        }
-        gpu_board_config_t *gpu_board = app_gpu_board_config_get();
-
-        if(uvc_device->width != config->mipi.panel->timing.h_size || uvc_device->height != config->mipi.panel->timing.v_size)
-        {
-            gpu_board->flexa.scale = true;
-        }
-        ret = app_gpu_v2_turn_on(uvc_device->width, uvc_device->height);
-
+    if (info->video_enable) {
+        ret = gpu_pipeline_attach(info);
         if (ret != BK_OK) {
-            LOGE("%s, app_gpu_v2_turn_on failed, ret = %d\n", __func__, ret);
-            goto error;
-        }
-        info->gpu_handle = app_gpu_handle_get();
-        if (info->gpu_handle == NULL) {
-            LOGE("%s, app_gpu_handle_get failed\n", __func__);
-            goto error;
-        }
-        ret = app_jpeg_decode_get_handle(&info->decode_handle);
-        if (ret == BK_OK) {
-            ret = bk_flexa_mjpegd_gpu_bond_start(&info->gpu_bond, info->decode_handle, info->gpu_handle);
-            if (ret != BK_OK) {
-                LOGE("%s, bk_flexa_mjpegd_gpu_bond_start failed, ret = %d\n", __func__, ret);
-                goto error;
-            }
-        }
-    }
-    else if (display_source->id == DISPLAY_STREAM_ID_MIPI_CSI)
-    {
-        ret = app_gpu_turn_on(app_gpu_board_config_get());
-        if (ret != BK_OK) {
-            LOGE("%s, app_gpu_turn_on failed, ret = %d\n", __func__, ret);
-            goto error;
-        }
-        info->gpu_handle = app_gpu_handle_get();
-        if (info->gpu_handle == NULL) {
-            LOGE("%s, app_gpu_handle_get failed\n", __func__);
-            goto error;
-        }
-        info->isp_handle = app_isp_handle_get();
-        if (info->isp_handle == NULL) {
-            LOGE("%s, app_isp_handle_get failed\n", __func__);
-            goto error;
-        }
-        ret = bk_flexa_isp_gpu_bond_start(&info->gpu_bond, info->isp_handle, info->gpu_handle);
-        if (ret != BK_OK) {
-            LOGE("%s, bk_flexa_isp_gpu_bond_start failed, ret = %d\n", __func__, ret);
+            LOGE("%s, gpu_pipeline_attach failed, ret = %d\n", __func__, ret);
             goto error;
         }
     }
-	
+
     info->lcd_enable = true;
     LOGD("%s success\n", __func__);
     return BK_OK;
 
 error:
-    ret = doorbell_display_gpu_stop(info, display_source);
-    if (ret != BK_OK)
-    {
-        LOGE("%s, doorbell_display_gpu_stop failed, ret = %d\n", __func__, ret);
-    }
+    gpu_pipeline_detach(info);
     ret = app_mipi_lcd_turn_off();
     if (ret != BK_OK)
     {
@@ -597,13 +636,7 @@ int doorbell_display_turn_off(void)
         return EVT_STATUS_ALREADY;
     }
 
-    display_source_t *display_source = devices_mgmt_get_display_source();
-    ret = doorbell_display_gpu_stop(info, display_source);
-    if (ret != BK_OK)
-    {
-        LOGE("%s, doorbell_display_gpu_stop failed, ret = %d\n", __func__, ret);
-        return ret;
-    }
+    gpu_pipeline_detach(info);
 
     ret = app_mipi_lcd_turn_off();
     if (ret != BK_OK)

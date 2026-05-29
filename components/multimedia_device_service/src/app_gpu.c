@@ -58,9 +58,14 @@ static void *app_gpu_frame_malloc(uint32_t size)
 static avdk_err_t app_gpu_frame_free(void *ptr)
 {
 #if (CONFIG_PSRAM_WRITE_THROUGH)
-    bk_psram_disable_write_through(s_psram_cover_area);
+    if (s_psram_cover_area < PSRAM_WRITE_THROUGH_AREA_COUNT)
+    {
+        bk_psram_disable_write_through(s_psram_cover_area);
+    }
 #endif
-    bk_frame_buffer_free(ptr);
+    if (ptr != NULL) {
+        bk_frame_buffer_free(ptr);
+    }
     return AVDK_ERR_OK;
 }
 
@@ -71,7 +76,7 @@ static void app_gpu_frame_complete(void *frame, uint32_t frame_size, void *args)
     avdk_err_t ret = app_mipi_lcd_flush(frame, app_gpu_frame_free);
     if (ret != AVDK_ERR_OK)
     {
-        LOGD("%s, %d, GPU failed to complete frame %d\r\n", __func__, __LINE__, ret);
+        LOGD("%s, %d, GPU failed to complete frame %p, %d\r\n", __func__, __LINE__, frame, ret);
         app_gpu_frame_free(frame);
     }
 }
