@@ -2,7 +2,7 @@
 # The occupied space is: bin size*34/32(and 68K aligned),,,,,
 FLASH_CAPACITY=8M
 #Name,Offset,Size,Type,Read,Write
-primary_bootloader,,68k,code,TRUE,FALSE
+#primary_bootloader,,68k,code,TRUE,FALSE
 primary_cp_app,,1360k,code,TRUE,FALSE
 primary_ap_app,,2040k,code,TRUE,FALSE
 ota,,2040K,data,TRUE,TRUE
