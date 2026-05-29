@@ -560,9 +560,7 @@ int doorbell_video_transfer_turn_off(void)
         LOGD("%s, success\n", __func__);
     }
 
-#if (CONFIG_INTEGRATION_DOORBELL_CS2)
    // ntwk_trans_cs2_video_timer_deinit();
-#endif
 
     return ret;
 }

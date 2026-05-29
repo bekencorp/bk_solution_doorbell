@@ -188,7 +188,6 @@ static void doorbell_message_handle(void *param)
 
                 case DBEVT_P2P_CS2_SERVICE_START_REQUEST:
                 {
-#ifdef CONFIG_INTEGRATION_DOORBELL_CS2
                     LOGD("DBEVT_P2P_CS2_SERVICE_START_REQUEST\n");
 
                     if (db_info->service != DOORBELL_SERVICE_NONE)
@@ -201,8 +200,6 @@ static void doorbell_message_handle(void *param)
 
                    //p2p_cs2_key_t *key = (p2p_cs2_key_t *)msg.param;
                     doorbell_bk_network_transfer_init("cs2_service", (void *)msg.param);
-
-#endif
                 }
                 break;
 
