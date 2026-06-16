@@ -36,6 +36,7 @@ typedef struct
 {
     uint32_t enabled : 1;
     uint32_t service : 6;
+    uint32_t stopping : 1;    // indicate if the service is stopped
 
     char *id;
     beken_thread_t thd;
@@ -266,6 +267,24 @@ static void doorbell_message_handle(void *param)
 
                 case DBEVT_REMOTE_DEVICE_DISCONNECTED:
                 {
+                    if (db_info->stopping)
+                    {
+                        LOGD("DBEVT_REMOTE_DEVICE_DISCONNECTED is stopping, skip\r\n");
+                        break;
+                    }
+
+                    db_info->stopping = BK_TRUE;
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+                    if (db_info->service == DOORBELL_SERVICE_LAN_TCP)
+                    {
+                        doorbell_bk_network_transfer_deinit("tcp_service");
+                    }
+                    else if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
+                    {
+                        doorbell_bk_network_transfer_deinit("udp_service");
+                    }
+#endif
                     doorbell_video_transfer_turn_off();
                     /* Abrupt disconnect: phone may not have sent TURN_OFF, so close
                      * camera/LCD hardware explicitly. Both are safe no-ops when
@@ -278,9 +297,7 @@ static void doorbell_message_handle(void *param)
                     #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     /* Abrupt disconnect: phone may not have sent TURN_OFF, clear stale
                      * votes so the keepalive idle check can detect idle and sleep. */
-                    doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, false);
-                    doorbell_mm_service_vote(MM_STATUS_AUDIO_BIT, false);
-                    doorbell_mm_service_vote(MM_STATUS_LCD_BIT, false);
+                    doorbell_mm_service_vote(MM_STATUS_ALL_BIT, false);
                     #endif
                     #if !CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
@@ -294,6 +311,7 @@ static void doorbell_message_handle(void *param)
                     #else
                     db_info->service = DOORBELL_SERVICE_NONE;
                     #endif
+                    db_info->stopping = BK_FALSE;
                 }
                 break;
 
@@ -326,7 +344,6 @@ static void doorbell_message_handle(void *param)
                 {
                     LOGD("DBEVT_LAN_TCP_SERVICE_STOP\n");
                     doorbell_bk_network_transfer_deinit("tcp_service");
-                    doorbell_keepalive_send_keepalive();
                 }
                 break;
 
@@ -334,6 +351,19 @@ static void doorbell_message_handle(void *param)
                 {
                     LOGD("DBEVT_LAN_UDP_SERVICE_STOP\n");
                     doorbell_bk_network_transfer_deinit("udp_service");
+                }
+                break;
+
+                case DBEVT_LAN_TCP_SERVICE_STOP_RESPONSE:
+                {
+                    LOGD("DBEVT_LAN_TCP_SERVICE_STOP_RESPONSE\n");
+                    doorbell_keepalive_send_keepalive();
+                }
+                break;
+
+                case DBEVT_LAN_UDP_SERVICE_STOP_RESPONSE:
+                {
+                    LOGD("DBEVT_LAN_UDP_SERVICE_STOP_RESPONSE\n");
                     doorbell_keepalive_send_keepalive();
                 }
                 break;
@@ -440,6 +470,7 @@ void doorbell_core_init(void)
 #endif
 
     db_info->enabled = BK_TRUE;
+    db_info->stopping = BK_FALSE;
 
     LOGD("%s success\n", __func__);
 

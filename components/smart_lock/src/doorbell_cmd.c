@@ -523,6 +523,9 @@ uint32_t doorbell_mm_service_vote(mm_status_bit_t service_bit, bool vote_add)
         case MM_STATUS_LCD_BIT:
             bit_mask = MM_STATUS_LCD_MASK;
             break;
+        case MM_STATUS_ALL_BIT:
+            bit_mask = MM_STATUS_ALL_MASK;
+            break;
         default:
             LOGE("%s: invalid service bit %d\n", __func__, service_bit);
             return mm_service_status;

@@ -20,6 +20,7 @@
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
 static uint8_t chan_connected_mask = 0;
+static uint8_t chan_stopped_mask = 0;
 
 #define CHAN_CTRL_BIT    (1 << NTWK_TRANS_CHAN_CTRL)
 #define CHAN_VIDEO_BIT   (1 << NTWK_TRANS_CHAN_VIDEO)
@@ -31,14 +32,29 @@ static void reset_chan_connected_mask(void)
     chan_connected_mask = 0;
 }
 
+static void reset_chan_stopped_mask(void)
+{
+    chan_stopped_mask = 0;
+}
+
 static bool check_all_channels_connected(void)
 {
     return (chan_connected_mask & ALL_CHAN_MASK) == ALL_CHAN_MASK;
 }
 
+static bool check_all_channels_stopped(void)
+{
+    return (chan_stopped_mask & ALL_CHAN_MASK) == ALL_CHAN_MASK;
+}
+
 static void set_chan_connected(chan_type_t chan_type)
 {
     chan_connected_mask |= (1 << chan_type);
+}
+
+static void set_chan_stopped(chan_type_t chan_type)
+{
+    chan_stopped_mask |= (1 << chan_type);
 }
 
 static void clear_chan_connected(chan_type_t chan_type)
@@ -50,6 +66,13 @@ static void clear_chan_connected(chan_type_t chan_type)
 bk_err_t doorbell_bk_net_cntrl_recv(uint8_t *data, uint32_t length)
 {
     LOGI("%s: length=%d\n", __func__, length);
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    if (!check_all_channels_connected())
+    {
+        LOGW("%s: network transfer is not ready, reject control command\n", __func__);
+        return BK_FAIL;
+    }
+#endif
     doorbell_transmission_cmd_recive_callback(data, length);
     return BK_OK;
 }
@@ -73,6 +96,7 @@ static dbevt_t handle_start_event(db_ntwk_type_t ntwk_type, chan_type_t chan_typ
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
     if (chan_type == NTWK_TRANS_CHAN_CTRL) {
         reset_chan_connected_mask();
+        reset_chan_stopped_mask();
     }
 #endif
     switch (chan_type)
@@ -230,6 +254,8 @@ static dbevt_t handle_stop_event(db_ntwk_type_t ntwk_type, chan_type_t chan_type
     if (chan_type == NTWK_TRANS_CHAN_CTRL) {
         reset_chan_connected_mask();
     }
+
+    set_chan_stopped(chan_type);
 #endif
 
     switch (chan_type)
@@ -262,6 +288,17 @@ static dbevt_t handle_stop_event(db_ntwk_type_t ntwk_type, chan_type_t chan_type
         default:
             return 0;
     }
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    if (check_all_channels_stopped()) {
+        reset_chan_stopped_mask();
+        if (ntwk_type == DB_NTWK_TYPE_TCP) {
+            return DBEVT_LAN_TCP_SERVICE_STOP_RESPONSE;
+        } else if (ntwk_type == DB_NTWK_TYPE_UDP) {
+            return DBEVT_LAN_UDP_SERVICE_STOP_RESPONSE;
+        }
+    }
+#endif
 
     return 0;
 }
@@ -357,6 +394,10 @@ static bk_err_t doorbell_network_transfer_start(char *service_name, void *param)
 bk_err_t doorbell_network_transfer_stop(void)
 {
     LOGI("%s start\n", __func__);
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    reset_chan_stopped_mask();
+#endif
 
     ntwk_trans_chan_stop(NTWK_TRANS_CHAN_CTRL);
     ntwk_trans_chan_stop(NTWK_TRANS_CHAN_VIDEO);
