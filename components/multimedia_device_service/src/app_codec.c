@@ -128,7 +128,7 @@ int app_h264e_turn_on(void)
         .width = isp_control->chn[chnl_id].chn_attr.chnFormat.width,
         .height = isp_control->chn[chnl_id].chn_attr.chnFormat.height,
         .input_format = BK_PIXEL_FORMAT_NV12,
-        .gop_frame_count = 30,
+        .gop_frame_count = 40,
         .input_flexa_cnt = 3,
         .input_buf = isp_control->chn[chnl_id].y_addr,
         .input_size = isp_control->chn[chnl_id].buf_cnt,
@@ -164,6 +164,19 @@ int app_h264e_turn_on(void)
         return ret;
     }
 
+    bk_h264_encode_rate_ctrl_t rate_ctrl = {
+        .bitrate = 1500000,
+        .qp_min_i = 20,
+        .qp_max_i = 51,
+        .qp_min_p = 26,
+        .qp_max_p = 51,
+    };
+    ret = bk_h264_encode_set_rate_ctrl(app_codec_enc_handler, &rate_ctrl);
+    if (ret != BK_OK)
+    {
+        LOGE("Set H.264 encoder rate control failed: %d\r\n", ret);
+        return ret;
+    }
     // 启动调试 (2秒间隔)
 #ifndef DUMP_ENCODE_DATA_ENABLE
     uint32_t debug_interval = 2000;
