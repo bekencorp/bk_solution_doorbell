@@ -13,6 +13,9 @@
 #include "app_camera.h"
 #include "app_codec.h"
 #include "mds_img_manager.h"
+#if CONFIG_H264E_STREAM_SESSION
+#include "h264e_stream_session.h"
+#endif
 #if CONFIG_NTWK_H264_DROP_POLICY
 #include "h264_backpressure_drop.h"
 #endif
@@ -45,6 +48,87 @@ typedef struct
 } h264e_msg_t;
 
 #define ENCODE_QUENE_ENABLE (0)
+#if CONFIG_H264E_STREAM_SESSION
+static beken_thread_t s_h264e_stream_transfer_thread = NULL;
+static beken_semaphore_t s_h264e_stream_transfer_sem = NULL;
+static volatile uint8_t s_h264e_stream_transfer_enable = 0;
+
+static void h264e_stream_transfer_task_entry(beken_thread_arg_t data)
+{
+    (void)data;
+    frame_buffer_t *frame = NULL;
+
+    rtos_set_semaphore(&s_h264e_stream_transfer_sem);
+
+    while (s_h264e_stream_transfer_enable) {
+        frame = (frame_buffer_t *)bk_encoded_complete_data_request(50);
+        if (frame == NULL) {
+            continue;
+        }
+
+        (void)h264e_stream_session_send_h264((uint8_t *)frame, frame->length);
+        bk_encoded_data_free_request((uint8_t *)frame);
+    }
+
+    s_h264e_stream_transfer_thread = NULL;
+    rtos_set_semaphore(&s_h264e_stream_transfer_sem);
+    rtos_delete_thread(NULL);
+}
+
+static bk_err_t h264e_stream_transfer_start(void)
+{
+    bk_err_t ret;
+
+    if (s_h264e_stream_transfer_thread != NULL) {
+        return BK_OK;
+    }
+
+    if (s_h264e_stream_transfer_sem == NULL) {
+        ret = rtos_init_semaphore(&s_h264e_stream_transfer_sem, 1);
+        if (ret != BK_OK) {
+            LOGE("transfer sem init failed: %d\r\n", ret);
+            return ret;
+        }
+    }
+
+    s_h264e_stream_transfer_enable = 1;
+    ret = rtos_create_hsram_thread(&s_h264e_stream_transfer_thread,
+                                   BEKEN_DEFAULT_WORKER_PRIORITY,
+                                   "h264e_stream_trs",
+                                   (beken_thread_function_t)h264e_stream_transfer_task_entry,
+                                   4096,
+                                   NULL);
+    if (ret != BK_OK) {
+        LOGE("transfer thread create failed: %d\r\n", ret);
+        s_h264e_stream_transfer_enable = 0;
+        if (s_h264e_stream_transfer_sem != NULL) {
+            rtos_deinit_semaphore(&s_h264e_stream_transfer_sem);
+            s_h264e_stream_transfer_sem = NULL;
+        }
+        return ret;
+    }
+
+    rtos_get_semaphore(&s_h264e_stream_transfer_sem, BEKEN_NEVER_TIMEOUT);
+    return BK_OK;
+}
+
+static void h264e_stream_transfer_stop(void)
+{
+    s_h264e_stream_transfer_enable = 0;
+
+    if (s_h264e_stream_transfer_thread != NULL) {
+        rtos_get_semaphore(&s_h264e_stream_transfer_sem, BEKEN_NEVER_TIMEOUT);
+        s_h264e_stream_transfer_thread = NULL;
+    }
+
+    if (s_h264e_stream_transfer_sem != NULL) {
+        rtos_deinit_semaphore(&s_h264e_stream_transfer_sem);
+        s_h264e_stream_transfer_sem = NULL;
+    }
+}
+#endif
+
+
 
 void *encoder_buffer_request(uint32_t buffer_len, void *args)
 {
@@ -94,7 +178,10 @@ int app_h264e_turn_off(void)
     if (app_codec_enc_handler == NULL) {
         return BK_OK;
     }
-
+    
+#if CONFIG_H264E_STREAM_SESSION
+    h264e_stream_transfer_stop();
+#endif
     // 停止调试
     bk_h264_encode_ioctl(app_codec_enc_handler, BK_H264_ENCODE_IOCTL_DEBUG_STOP, NULL);
 
@@ -181,6 +268,13 @@ int app_h264e_turn_on(void)
 #ifndef DUMP_ENCODE_DATA_ENABLE
     uint32_t debug_interval = 2000;
     bk_h264_encode_ioctl(app_codec_enc_handler, BK_H264_ENCODE_IOCTL_DEBUG_START, &debug_interval);
+#endif
+#if CONFIG_H264E_STREAM_SESSION
+    ret = h264e_stream_transfer_start();
+    if (ret != BK_OK) {
+        LOGE("h264 stream transfer start failed: %d\r\n", ret);
+        return ret;
+    }
 #endif
     return ret;
 }

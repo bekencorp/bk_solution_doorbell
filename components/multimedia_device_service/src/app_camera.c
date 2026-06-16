@@ -97,10 +97,16 @@ int app_isp_camera_turn_off(void)
 
     avdk_err_t ret = AVDK_ERR_OK;
 
+    if (isp_cam_handle.camera_ctlr_handle == NULL && isp_cam_handle.isp_handle == NULL)
+    {
+        return AVDK_ERR_OK;
+    }
+
     /* Step 1: stop and destroy MP instance if exists.
      * This will stop ISP streaming and internal ISP read task safely.
      */
-    if (bk_isp_camera_channel_state_get(isp_cam_handle.camera_ctlr_handle, ISP_MP_CHN_ID) == ISP_CHANNEL_STATE_TURN_ON)
+    if (isp_cam_handle.camera_ctlr_handle != NULL &&
+        bk_isp_camera_channel_state_get(isp_cam_handle.camera_ctlr_handle, ISP_MP_CHN_ID) == ISP_CHANNEL_STATE_TURN_ON)
     {
 
         ret = bk_isp_camera_channel_close(isp_cam_handle.camera_ctlr_handle, ISP_MP_CHN_ID);
@@ -112,7 +118,8 @@ int app_isp_camera_turn_off(void)
     }
 
     /* Step 2: stop and destroy SP instance if exists (for completeness). */
-    if (bk_isp_camera_channel_state_get(isp_cam_handle.camera_ctlr_handle, ISP_SP_CHN_ID) == ISP_CHANNEL_STATE_TURN_ON)
+    if (isp_cam_handle.camera_ctlr_handle != NULL &&
+        bk_isp_camera_channel_state_get(isp_cam_handle.camera_ctlr_handle, ISP_SP_CHN_ID) == ISP_CHANNEL_STATE_TURN_ON)
     {
         ret = bk_isp_camera_channel_close(isp_cam_handle.camera_ctlr_handle, ISP_SP_CHN_ID);
         if (ret != AVDK_ERR_OK)
