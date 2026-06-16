@@ -346,8 +346,6 @@ int app_mipi_lcd_turn_on(display_board_config_t *config)
         LOGE("dsi bus new err: %d\n", ret);
         goto err;
     }
-
-
     bk_lcd_panel_config_t panel_dev_cfg = {
         .reset_pin = config->mipi.pin_reset,
     };

@@ -305,16 +305,24 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             doorbell_asr_turn_off();
 #endif
 
-            int ret = doorbell_camera_turn_on(&parameters);
-            if (ret != BK_OK)
+            int cam_ret = doorbell_camera_turn_on(&parameters);
+            if (cam_ret != BK_OK)
             {
                 LOGE("doorbell_camera_turn_on failed\n");
             }
-            ret = doorbell_video_transfer_turn_on();
-            if (ret != BK_OK)
+
+            int trans_ret = BK_OK;
+            if (cam_ret == BK_OK)
             {
-                LOGE("doorbell_video_transfer_turn_on failed\n");
+                trans_ret = doorbell_video_transfer_turn_on();
+                if (trans_ret != BK_OK)
+                {
+                    LOGE("doorbell_video_transfer_turn_on failed\n");
+                    doorbell_camera_turn_off();
+                }
             }
+
+            int ret = (cam_ret == BK_OK && trans_ret == BK_OK) ? BK_OK : BK_FAIL;
 
             #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
             if (ret == BK_OK)

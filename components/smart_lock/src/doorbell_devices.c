@@ -431,6 +431,37 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
     return BK_OK;
 
 err:
+    gpu_pipeline_detach(info);
+
+    if (info->camera_id == UVC_DEVICE_ID)
+    {
+#ifdef CONFIG_USB_CAMERA
+        if (info->h264e_bond != NULL)
+        {
+            bk_flexa_mjpegd_h264e_bond_stop(info->h264e_bond);
+            info->h264e_bond = NULL;
+        }
+        app_uvc_turn_off(1);
+        app_h264_encode_close();
+        app_jpeg_decode_close();
+        info->decode_handle = NULL;
+        info->encode_handle = NULL;
+#endif
+    }
+    else
+    {
+        if (info->h264e_bond != NULL)
+        {
+            bk_flexa_isp_h264e_bond_stop(info->h264e_bond);
+            info->h264e_bond = NULL;
+        }
+        info->isp_handle = NULL;
+        info->encode_handle = NULL;
+        app_h264e_turn_off();
+        app_isp_camera_turn_off();
+    }
+
+    info->video_enable = false;
     return ret;
 }
 
@@ -579,19 +610,7 @@ int doorbell_display_turn_on(display_board_config_t *config)
         return ret;
     }
 
-    display_source_t *display_source = devices_mgmt_get_display_source();
 
-    if (display_source == NULL)
-    {
-        LOGE("%s, display_source not found\n", __func__);
-        return ret;
-    }
-
-    if (display_source->id == DISPLAY_STREAM_ID_INVALID)
-    {
-        LOGE("%s, display_source id is invalid\n", __func__);
-        return ret;
-    }
     ret = app_mipi_lcd_turn_on(config);
     if (ret != BK_OK)
     {
@@ -599,15 +618,18 @@ int doorbell_display_turn_on(display_board_config_t *config)
         return ret;
     }
 
-    if (info->video_enable) {
+    info->lcd_enable = true;
+
+    if (info->video_enable && info->lcd_enable)
+    {
         ret = gpu_pipeline_attach(info);
-        if (ret != BK_OK) {
+        if (ret != BK_OK)
+        {
             LOGE("%s, gpu_pipeline_attach failed, ret = %d\n", __func__, ret);
             goto error;
         }
     }
 
-    info->lcd_enable = true;
     LOGD("%s success\n", __func__);
     return BK_OK;
 
