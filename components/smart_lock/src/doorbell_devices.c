@@ -17,6 +17,11 @@
 #include "devices_mgmt.h"
 #include <sys_types.h>
 #include <modules/pm.h>
+#ifdef CONFIG_MDS_SNAPSHOT
+#include "bk_snapshot.h"
+#include "bk_snapshot_sw.h"
+#include <components/bk_encode/bk_h264_encode_ctlr.h>
+#endif
 #if CONFIG_INTEGRATION_DOORBELL_KVS
 #include "doorbell_kvs_network_transfer.h"
 #endif
@@ -408,6 +413,11 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
             goto err;
         }
 
+#ifdef CONFIG_MDS_SNAPSHOT
+        /* Pre-allocate snapshot buffers only; open SP on capture to avoid idle ISP load. */
+        (void)bk_snapshot_sw_prepare();
+#endif
+
         if (info->lcd_enable) {
             ret = gpu_pipeline_attach(info);
             if (ret != BK_OK) {
@@ -458,6 +468,9 @@ err:
         info->isp_handle = NULL;
         info->encode_handle = NULL;
         app_h264e_turn_off();
+#ifdef CONFIG_MDS_SNAPSHOT
+        (void)bk_snapshot_sw_deinit();
+#endif
         app_isp_camera_turn_off();
     }
 
@@ -526,6 +539,9 @@ int doorbell_camera_turn_off(void)
             return ret;
         }
 
+#ifdef CONFIG_MDS_SNAPSHOT
+        (void)bk_snapshot_sw_deinit();
+#endif
         ret = app_isp_camera_turn_off();
 
     }
@@ -536,7 +552,6 @@ int doorbell_camera_turn_off(void)
         ret = BK_FAIL;
         return ret;
     }
-
     info->video_enable = false;
     LOGD("%s success\n", __func__);
 
@@ -595,6 +610,113 @@ int doorbell_video_transfer_turn_off(void)
 
     return ret;
 }
+
+#ifdef CONFIG_MDS_SNAPSHOT
+bk_err_t doorbell_isp_snapshot_sw_capture(bk_snapshot_image_t *out_image)
+{
+    bk_snapshot_sw_config_t cfg = {0};
+    avdk_err_t ret;
+
+    if (out_image == NULL)
+    {
+        return BK_ERR_PARAM;
+    }
+
+    os_memset(out_image, 0, sizeof(*out_image));
+
+    if (db_device_info == NULL || db_device_info->video_enable == false)
+    {
+        LOGE("%s, video pipeline not running\n", __func__);
+        return BK_FAIL;
+    }
+
+    if (db_device_info->camera_id == UVC_DEVICE_ID)
+    {
+        LOGE("%s, UVC path not supported\n", __func__);
+        return BK_ERR_NOT_SUPPORT;
+    }
+
+    cfg.camera_handle = app_isp_camera_ctlr_handle_get();
+    if (cfg.camera_handle == NULL)
+    {
+        LOGE("%s, camera handle is null\n", __func__);
+        return BK_FAIL;
+    }
+
+    cfg.width = BK_SNAPSHOT_SW_DEFAULT_WIDTH;
+    cfg.height = BK_SNAPSHOT_SW_DEFAULT_HEIGHT;
+    cfg.jpeg_quality = BK_SNAPSHOT_SW_DEFAULT_QUALITY;
+    cfg.read_timeout_ms = BK_SNAPSHOT_SW_DEFAULT_TIMEOUT_MS;
+
+    ret = bk_snapshot_sw_capture(&cfg, out_image);
+    if (ret != AVDK_ERR_OK || out_image->size == 0)
+    {
+        LOGE("%s, bk_snapshot_sw_capture failed ret=%d size=%u\n", __func__, ret, out_image->size);
+        return BK_FAIL;
+    }
+
+    if (db_device_info->encode_handle != NULL) {
+        (void)bk_h264_encode_force_idr((bk_h264_encode_ctlr_handle_t)db_device_info->encode_handle);
+    }
+
+    LOGI("%s, ok size=%u %ux%u\n", __func__, out_image->size, out_image->width, out_image->height);
+    return BK_OK;
+}
+
+bk_err_t doorbell_isp_snapshot_capture(bk_snapshot_image_t *out_image)
+{
+    db_device_info_t *info = db_device_info;
+    bk_snapshot_config_t cfg = {0};
+    avdk_err_t ret;
+
+    if (out_image == NULL)
+    {
+        return BK_ERR_PARAM;
+    }
+
+    os_memset(out_image, 0, sizeof(*out_image));
+
+    if (info == NULL)
+    {
+        LOGE("%s, info not init\n", __func__);
+        return BK_FAIL;
+    }
+
+    if (info->video_enable == false)
+    {
+        LOGE("%s, video not open, turn on camera first\n", __func__);
+        return BK_FAIL;
+    }
+
+    if (info->camera_id == UVC_DEVICE_ID)
+    {
+        LOGE("%s, UVC path not supported\n", __func__);
+        return BK_ERR_NOT_SUPPORT;
+    }
+
+    if (info->isp_handle == NULL || info->encode_handle == NULL || info->h264e_bond == NULL)
+    {
+        LOGE("%s, isp/h264 pipeline not ready\n", __func__);
+        return BK_FAIL;
+    }
+
+    cfg.source_handle = info->isp_handle;
+    cfg.h264_handle = info->encode_handle;
+    cfg.h264_bond = &info->h264e_bond;
+    cfg.jpeg_quality = 5;
+    cfg.timeout_ms = 3000;
+
+    ret = bk_snapshot_capture(&cfg, out_image);
+    if (ret != AVDK_ERR_OK || out_image->size == 0)
+    {
+        LOGE("%s, bk_snapshot_capture failed ret=%d size=%u\n", __func__, ret, out_image->size);
+        return BK_FAIL;
+    }
+
+    LOGI("%s, ok size=%u %ux%u\n", __func__, out_image->size, out_image->width, out_image->height);
+    return BK_OK;
+}
+#endif
 
 int doorbell_display_turn_on(display_board_config_t *config)
 {

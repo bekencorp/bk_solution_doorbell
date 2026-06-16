@@ -3,4 +3,11 @@ menu "Doorbell Service"
         depends on ISP
         bool "app layer open isp mp channel default"
         default y
+
+    config MDS_SNAPSHOT
+        bool "Enable snapshot capture module (JPEG HW/SW)"
+        default n
+        help
+            Build snapshot capture into multimedia_device_service.
+            Enable this option when snapshot CLI / doorbell capture is needed.
 endmenu

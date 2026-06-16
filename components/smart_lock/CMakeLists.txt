@@ -20,6 +20,9 @@ elseif (CONFIG_INTEGRATION_DOORBELL)
 		src/doorbell_cmd.c
 		src/bk_smart_config.c
 	)
+	if (CONFIG_MDS_SNAPSHOT)
+		list(APPEND srcs src/doorbell_snapshot_sd.c)
+	endif()
 endif()
 
 if (CONFIG_INTEGRATION_DOORBELL AND CONFIG_NTWK_CLIENT_SERVICE_ENABLE)
@@ -35,7 +38,7 @@ if (CONFIG_VOICE_SERVICE)
 	)
 endif()
 
-set(req media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bt multimedia_device_service bk_peripheral media_service bk_asr_service)
+set(req media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bt multimedia_device_service bk_peripheral media_service bk_asr_service bk_vfs)
 
 armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" REQUIRES "${req}"
 )

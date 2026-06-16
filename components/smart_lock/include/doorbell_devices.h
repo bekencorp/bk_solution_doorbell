@@ -4,6 +4,9 @@
 #include <components/bk_encode/bk_h264_encode_types.h>
 #include <components/bk_decode/bk_jpeg_decode_types.h>
 #include <components/bk_flexa_bond.h>
+#ifdef CONFIG_MDS_SNAPSHOT
+#include "bk_snapshot.h"
+#endif
 
 #include "app_display_types.h"
 
@@ -75,5 +78,34 @@ int doorbell_video_transfer_turn_on(void);
  * BK_ERR_NOT_SUPPORT: 不支持该操作
  */
 int doorbell_video_transfer_turn_off(void);
+
+#ifdef CONFIG_MDS_SNAPSHOT
+/**
+ * @brief Capture one JPEG snapshot via software JPEG encoder (ISP SP channel).
+ *
+ * @param out_image Output image buffer; caller must release via bk_snapshot_image_release().
+ * @return BK_OK on success.
+ */
+bk_err_t doorbell_isp_snapshot_sw_capture(bk_snapshot_image_t *out_image);
+
+/**
+ * @brief Capture one JPEG snapshot via hardware JPEG encoder (ISP + H264 pipeline).
+ *
+ * Video transfer may stay on; H264 bond is restored after capture.
+ * UVC path is not supported.
+ *
+ * @param out_image Output image buffer; caller must release via bk_snapshot_image_release().
+ * @return BK_OK on success, BK_FAIL/BK_ERR_NOT_SUPPORT otherwise.
+ */
+bk_err_t doorbell_isp_snapshot_capture(bk_snapshot_image_t *out_image);
+
+/**
+ * @brief Save snapshot JPEG data to SD card (/sd0/snap_XXXX.jpg).
+ *
+ * Requires CONFIG_SDCARD. path_out may be NULL.
+ */
+bk_err_t doorbell_snapshot_save_to_sd(const bk_snapshot_image_t *image, char *path_out,
+                                      uint32_t path_len);
+#endif
 
 #endif

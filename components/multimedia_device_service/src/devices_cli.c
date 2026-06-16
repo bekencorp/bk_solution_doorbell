@@ -23,6 +23,9 @@
 #include <components/bk_flexa_bond.h>
 #include "app_jpeg_decode.h"
 #include <components/bk_encode/bk_h264_encode_ctlr.h>
+#ifdef CONFIG_MDS_SNAPSHOT
+#include "bk_snapshot_sw.h"
+#endif
 #include <lcd/lcd_mipi_hx8399c_1080x1920.h>
 #include <lcd/lcd_mipi_hx8394f_720x1280.h>
 
@@ -754,6 +757,10 @@ void cli_avdk_mds_joint_test_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
                 return;
             }
 
+#ifdef CONFIG_MDS_SNAPSHOT
+            (void)bk_snapshot_sw_prepare();
+#endif
+
             return;
         }
         if (argc >= 3 && argv[2] != NULL && os_strcmp(argv[2], "uvc") == 0) {
@@ -1196,6 +1203,93 @@ static void cli_avdk_mds_h264_qp_cmd(char *pcWriteBuffer, int xWriteBufferLen, i
     LOGE("Usage: h264_qp get | set <bitrate> <i_min> <i_max> <p_min> <p_max>\n");
 }
 
+#if defined(CONFIG_INTEGRATION_DOORBELL) && defined(CONFIG_MDS_SNAPSHOT)
+#include "bk_snapshot.h"
+
+static void cli_avdk_mds_snapshot_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, char **argv)
+{
+    (void)pcWriteBuffer;
+    (void)xWriteBufferLen;
+
+    extern bk_err_t doorbell_isp_snapshot_sw_capture(bk_snapshot_image_t *out_image);
+    extern bk_err_t doorbell_isp_snapshot_capture(bk_snapshot_image_t *out_image);
+    extern bk_err_t doorbell_snapshot_save_to_sd(const bk_snapshot_image_t *image, char *path_out,
+                                                 uint32_t path_len);
+
+    bk_snapshot_image_t image = {0};
+    bk_err_t ret = BK_OK;
+    bool use_sw = true;
+    bool save_to_sd = false;
+    char saved_path[64] = {0};
+    int i;
+
+    if (argc < 2 || argv[1] == NULL || os_strcmp(argv[1], "capture") != 0)
+    {
+        LOGE("Usage: snapshot capture [sw|hw] [save]\r\n");
+        return;
+    }
+
+    for (i = 2; i < argc; i++)
+    {
+        if (argv[i] == NULL)
+        {
+            continue;
+        }
+        if (os_strcmp(argv[i], "hw") == 0)
+        {
+            use_sw = false;
+        }
+        else if (os_strcmp(argv[i], "sw") == 0)
+        {
+            use_sw = true;
+        }
+        else if (os_strcmp(argv[i], "save") == 0)
+        {
+            save_to_sd = true;
+        }
+        else
+        {
+            LOGE("Usage: snapshot capture [sw|hw] [save]\r\n");
+            return;
+        }
+    }
+
+    if (use_sw)
+    {
+        ret = doorbell_isp_snapshot_sw_capture(&image);
+    }
+    else
+    {
+        ret = doorbell_isp_snapshot_capture(&image);
+    }
+
+    if (ret != BK_OK)
+    {
+        LOGE("snapshot %s capture failed, ret=%d\r\n", use_sw ? "sw" : "hw", ret);
+        goto out;
+    }
+
+    bk_printf("[RESULT][PASS] snapshot %s ok, size=%u %ux%u\r\n",
+              use_sw ? "sw" : "hw", image.size, image.width, image.height);
+
+    if (save_to_sd)
+    {
+        ret = doorbell_snapshot_save_to_sd(&image, saved_path, sizeof(saved_path));
+        if (ret != BK_OK)
+        {
+            LOGE("snapshot save to sd failed, ret=%d\r\n", ret);
+        }
+        else if (saved_path[0] != '\0')
+        {
+            bk_printf("[RESULT][PASS] snapshot saved to %s\r\n", saved_path);
+        }
+    }
+
+out:
+    bk_snapshot_image_release(&image);
+}
+#endif
+
 static const struct cli_command s_devices_cli_commands[] =
 {
     {"isp", "isp...", cli_avdk_mds_isp_cmd},
@@ -1205,6 +1299,9 @@ static const struct cli_command s_devices_cli_commands[] =
     {"doorbell", "doorbell...", cli_avdk_mds_cmd},
     {"audio", "audio...", cli_avdk_mds_audio_cmd},
     {"h264_qp", "h264_qp get | set <bitrate> <i_min> <i_max> <p_min> <p_max>", cli_avdk_mds_h264_qp_cmd},
+#if defined(CONFIG_INTEGRATION_DOORBELL) && defined(CONFIG_MDS_SNAPSHOT)
+    {"snapshot", "snapshot capture [sw|hw] [save]", cli_avdk_mds_snapshot_cmd},
+#endif
 };
 
 #define DEVICES_CLI_CMD_CNT  (sizeof(s_devices_cli_commands) / sizeof(struct cli_command))

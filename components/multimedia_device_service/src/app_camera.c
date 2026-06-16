@@ -22,6 +22,9 @@
 #include <components/bk_camera_bus.h>
 #include <sys_types.h>
 #include <modules/pm.h>
+#ifdef CONFIG_MDS_SNAPSHOT
+#include "bk_snapshot_sw.h"
+#endif
 #define TAG "db-camera"
 
 #define LOGI(...) BK_LOGW(TAG, ##__VA_ARGS__)
@@ -81,6 +84,11 @@ avdk_err_t app_mipi_camera_power_enable(bool enable)
 void *app_isp_handle_get(void)
 {
     return isp_cam_handle.isp_handle;
+}
+
+bk_isp_camera_ctlr_handle_t app_isp_camera_ctlr_handle_get(void)
+{
+    return isp_cam_handle.camera_ctlr_handle;
 }
 
 int app_isp_camera_turn_off(void)
@@ -667,6 +675,55 @@ int app_isp_camera_sp_channel_turn_on(const camera_board_config_t *config)
 
 err:
     return AVDK_ERR_GENERIC;
+}
+
+avdk_err_t app_isp_camera_sp_snapshot_channel_ensure(uint16_t width, uint16_t height)
+{
+    avdk_err_t ret = AVDK_ERR_OK;
+
+    if (width == 0 || height == 0)
+    {
+        return AVDK_ERR_INVAL;
+    }
+
+    if (isp_cam_handle.camera_ctlr_handle == NULL)
+    {
+        return AVDK_ERR_NODEV;
+    }
+
+    if (bk_isp_camera_channel_state_get(isp_cam_handle.camera_ctlr_handle, ISP_SP_CHN_ID) ==
+        ISP_CHANNEL_STATE_TURN_ON)
+    {
+        return AVDK_ERR_OK;
+    }
+
+#ifdef CONFIG_MDS_SNAPSHOT
+    ret = bk_snapshot_sw_sp_channel_open_at_mp_mid_frame(isp_cam_handle.camera_ctlr_handle, width, height);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("%s, open SP %ux%u at MP mid-frame interrupt failed ret=%d\n", __func__, width, height, ret);
+        return ret;
+    }
+#else
+    bk_isp_camera_channel_config_t instance = CAM_MP_NV12_RB_INSTANCE_CONFIG(width, height);
+    instance.port_id = 0;
+    instance.enable_flexa = 0;
+    instance.work_mode = 0;
+    instance.buf_cnt = 2;
+    instance.width = width;
+    instance.height = height;
+    instance.format = BK_PIXEL_FORMAT_NV12;
+
+    ret = bk_isp_camera_channel_open(isp_cam_handle.camera_ctlr_handle, ISP_SP_CHN_ID, &instance);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("%s, open SP %ux%u failed ret=%d\n", __func__, width, height, ret);
+        return ret;
+    }
+#endif
+
+    LOGI("%s, SP snapshot channel ready %ux%u\n", __func__, width, height);
+    return AVDK_ERR_OK;
 }
 
 int app_isp_camera_channel_read(uint8_t channel ,uint8_t *frame, uint32_t size, uint32_t timeout)
