@@ -390,6 +390,27 @@ int doorbell_asr_turn_off(void)
     return BK_OK;
 }
 
+void doorbell_asr_arbitrate(void)
+{
+    bool busy;
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    /* Resource-constrained: any active media service (camera/audio/lcd) preempts ASR. */
+    busy = (doorbell_mm_service_get_status() != 0);
+#else
+    busy = (gl_db_audio_device_info != NULL &&
+            gl_db_audio_device_info->audio_enable == BK_TRUE);
+#endif
+
+    /* ASR is armed only once at boot/wakeup (see ap_main). At runtime we only ever
+     * turn it OFF when a media service is active; the idle gap before keepalive
+     * sleep is too short to be worth re-arming, so we never turn it back on here. */
+    if (busy)
+    {
+        doorbell_asr_turn_off();
+    }
+}
+
 void cli_doorbell_asr_turn_off(void)
 {
     doorbell_asr_turn_off();

@@ -270,10 +270,12 @@ static void doorbell_message_handle(void *param)
 #ifdef CONFIG_VOICE_SERVICE
                     doorbell_audio_turn_off();
 #endif
-                #if (CONFIG_ASR_SERVICE_WITH_MIC)
-                    extern int doorbell_asr_turn_on(void);
-                    doorbell_asr_turn_on();
-                #endif
+                    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+                    /* Abrupt disconnect: phone may not have sent TURN_OFF, clear stale
+                     * votes so the keepalive idle check can detect idle and sleep. */
+                    doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, false);
+                    doorbell_mm_service_vote(MM_STATUS_AUDIO_BIT, false);
+                    #endif
                     #if !CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
                     {

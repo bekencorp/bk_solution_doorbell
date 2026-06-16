@@ -302,7 +302,6 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 #endif
 
 #if (CONFIG_ASR_SERVICE_WITH_MIC)
-            extern int doorbell_asr_turn_off(void);
             doorbell_asr_turn_off();
 #endif
 
@@ -345,12 +344,6 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             #endif
 
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
-
-#if (CONFIG_ASR_SERVICE_WITH_MIC)
-            extern int doorbell_asr_turn_on(void);
-            doorbell_asr_turn_on();
-#endif
-
         }
         break;
 
@@ -373,7 +366,6 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             STREAM_TO_UINT8(parameters.rmt_player_fmt, p);
 
 #if (CONFIG_ASR_SERVICE_WITH_MIC)
-            extern int doorbell_asr_turn_off(void);
             doorbell_asr_turn_off();
 #endif
             int ret = doorbell_audio_turn_on(&parameters);
@@ -407,11 +399,6 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             #endif
 
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
-
-#if (CONFIG_ASR_SERVICE_WITH_MIC)
-            extern int doorbell_asr_turn_on(void);
-            doorbell_asr_turn_on();
-#endif
         }
         break;
 
@@ -547,6 +534,12 @@ uint32_t doorbell_mm_service_vote(mm_status_bit_t service_bit, bool vote_add)
     }
 
     LOGD("%s: status=0x%x\n", __func__, mm_service_status);
+
+#if (CONFIG_ASR_SERVICE_WITH_MIC)
+    /* Central choke point: a newly active service (incl. LCD) turns ASR off. */
+    doorbell_asr_arbitrate();
+#endif
+
     return mm_service_status;
 }
 

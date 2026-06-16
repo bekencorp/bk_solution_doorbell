@@ -7,6 +7,7 @@
 #include "doorbell_comm.h"
 #include "doorbell_network.h"
 #include "doorbell_cmd.h"
+#include "doorbell_audio_device.h"
 #include <modules/wdrv_common.h>
 
 #define DOORBELL_KEEPALIVE_TAG "DOORBELL_KEEPALIVE"
@@ -501,6 +502,11 @@ void doorbell_keepalive_send_keepalive(void)
         LOGW("%s: Invalid network info (IP or port is empty)\n", __func__);
         return;
     }
+
+#if (CONFIG_ASR_SERVICE_WITH_MIC)
+    /* About to power off AP for keepalive: free the mic/ADC. */
+    doorbell_asr_turn_off();
+#endif
 
     // Send keepalive command with IP address and cmd_port
     ret = doorbell_ipc_start_keepalive((const char *)net_info.ip_addr, (const char *)net_info.cmd_port);

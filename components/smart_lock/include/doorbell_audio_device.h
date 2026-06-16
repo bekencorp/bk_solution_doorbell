@@ -1,6 +1,8 @@
 #ifndef __DOORBELL_AUDIO_DEVICE_H__
 #define __DOORBELL_AUDIO_DEVICE_H__
 
+#include <stdbool.h>
+
 #include <components/bk_voice_service_types.h>
 #include <components/bk_voice_read_service_types.h>
 #include <components/bk_voice_write_service_types.h>
@@ -132,5 +134,36 @@ int doorbell_audio_device_init(void);
  *                 - other: failed
  */
 void doorbell_audio_device_deinit(void);
+
+#if (CONFIG_ASR_SERVICE_WITH_MIC)
+/**
+ * @brief  Turn on ASR (keyword spotting with mic).
+ *
+ * Idempotent. Refuses when an audio session is active (mic hardware conflict).
+ *
+ * @return  BK_OK on success, otherwise failed.
+ */
+int doorbell_asr_turn_on(void);
+
+/**
+ * @brief  Turn off ASR.
+ *
+ * Idempotent.
+ *
+ * @return  BK_OK on success, otherwise failed.
+ */
+int doorbell_asr_turn_off(void);
+
+/**
+ * @brief  Turn ASR off if any media service (camera/audio/lcd) is active.
+ *
+ * Central choke point for the default ASR-off policy. ASR is armed only at
+ * boot/wakeup; this never turns ASR back on, because the idle window before
+ * keepalive sleep is too short to be worth re-arming. Idempotent and safe to
+ * call from any state change. Customers may bypass this and call
+ * doorbell_asr_turn_on()/doorbell_asr_turn_off() directly for their own policy.
+ */
+void doorbell_asr_arbitrate(void);
+#endif
 
 #endif
