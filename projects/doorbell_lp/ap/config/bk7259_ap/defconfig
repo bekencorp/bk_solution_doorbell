@@ -2,7 +2,7 @@
 # Project default config for BK7259 doorbell_lp AP side.
 # Combines doorbell multimedia features with AP-powerdown keepalive settings.
 #
-CONFIG_ALL_CODE_IN_PSRAM=y
+# CONFIG_ALL_CODE_IN_PSRAM is not set
 CONFIG_ISP=y
 CONFIG_MIPI_CSI=y
 CONFIG_DPU_DRIVER=y

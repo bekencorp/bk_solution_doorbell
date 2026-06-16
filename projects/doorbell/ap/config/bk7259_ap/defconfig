@@ -2,7 +2,7 @@
 # Automatically generated project default config. You can update it with menuconfig [D] option.
 # This file contains only differences compared to board defconfig.
 #
-CONFIG_ALL_CODE_IN_PSRAM=y
+# CONFIG_ALL_CODE_IN_PSRAM is not set
 CONFIG_ISP=y
 CONFIG_MIPI_CSI=y
 CONFIG_DPU_DRIVER=y
