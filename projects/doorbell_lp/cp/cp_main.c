@@ -13,15 +13,12 @@ extern void rtos_set_user_app_entry(beken_thread_function_t entry);
 
 
 void user_app_main(void) {
-    pl_wakeup_host(POWERUP_POWER_WAKEUP_FLAG);
-
-
     if (!ate_is_enabled())
     {
         db_ipc_msg_init();
     }
 
-
+    pl_wakeup_host(POWERUP_POWER_WAKEUP_FLAG);
 }
 
 int main(void)
