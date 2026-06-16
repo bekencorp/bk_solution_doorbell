@@ -1075,7 +1075,7 @@ void cli_avdk_mds_audio_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, 
 #if (CONFIG_ASR_SERVICE_WITH_MIC)
     else if (os_strcmp(argv[1], "asr_turn_on") == 0)
     {
-        uint32_t aec = 0;
+        uint32_t aec = 1;
         uint32_t uac = 0;
         uint32_t sample_rate = 16000;
         uint8_t asr_en = 1;
@@ -1088,8 +1088,8 @@ void cli_avdk_mds_audio_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, 
                 asr_en = os_strtoul(argv[5], NULL, 10);
             }
         } else {
-            LOGE("Usage: audio asr_turn_on <aec> <uac> <sample_rate>\n");
-            return; // TODO: add default value
+            //LOGE("Usage: audio asr_turn_on <aec> <uac> <sample_rate>\n");
+            //return; // TODO: add default value
         }
         cli_doorbell_asr_turn_on(aec, uac, sample_rate, asr_en);
     }
