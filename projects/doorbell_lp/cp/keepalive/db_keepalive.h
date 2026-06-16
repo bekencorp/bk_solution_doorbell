@@ -16,6 +16,10 @@ extern "C" {
 
 #define DB_KEEPALIVE_RX_MAX_RETRY_CNT 20
 
+// Max consecutive keepalive requests without a response before the link is
+// considered dead (watchdog based on missed responses, not raw recv timeout).
+#define DB_KEEPALIVE_MAX_NO_RESP_CNT (3)
+
 // Default keepalive interval in milliseconds
 #define DB_KEEPALIVE_DEFAULT_INTERVAL_MS (30 * 1000)  // 30 seconds
 
@@ -79,6 +83,7 @@ typedef struct {
     uint8_t *rx_raw_buffer;     // Buffer for raw received data (with db_pack header)
     uint8_t lp_state;  // Low power state: PM_MODE_LOW_VOLTAGE or PM_MODE_NORMAL_SLEEP
     alarm_info_t keepalive_rtc;  // RTC alarm for low voltage sleep wakeup
+    uint32_t keepalive_no_resp_cnt;  // Consecutive keepalive requests without response (watchdog)
 } db_keepalive_env_t;
 
 typedef enum

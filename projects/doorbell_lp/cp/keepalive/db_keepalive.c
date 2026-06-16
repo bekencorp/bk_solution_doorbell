@@ -254,12 +254,11 @@ static void db_keepalive_stop_keepalive_rtc(void)
 static void db_keepalive_timer_handler(void *data)
 {
     LOGI("%s %d\n", __func__, __LINE__);
+    // Only (re)enter low voltage sleep here. The RTC alarm is the single owner
+    // of periodic wakeup and is (re)armed exclusively by the TX loop. Re-arming
+    // it here would unregister/re-register the alarm that is about to fire and
+    // post the semaphore, silently dropping a keepalive period.
     cif_start_lv_sleep();
-    // Set RTC timer for low voltage sleep wakeup
-    // Note: This will be called after initial delay, then RTC takes over
-    if (s_keepalive_env.interval_ms >= DB_KEEPALIVE_RTC_TIMER_THRESHOLD_MS) {
-        db_keepalive_set_keepalive_rtc();
-    }
 }
 
 static void db_keepalive_start_lv_sleep(void)
@@ -312,39 +311,44 @@ static void db_keepalive_send_heartbeat(void)
     if (ret < 0) {
         LOGE("%s: Failed to send keepalive request, err=%d\n", __func__, errno);
     } else {
-        LOGD("%s: Keepalive request sent successfully, packed_len=%u\n", __func__, pack_len);
+        // Count this request as outstanding; it is cleared in the unpack
+        // callback when its response arrives. Drives the missed-response watchdog.
+        s_keepalive_env.keepalive_no_resp_cnt++;
+        LOGD("%s: Keepalive request sent successfully, packed_len=%u, no_resp_cnt=%u\n",
+             __func__, pack_len, s_keepalive_env.keepalive_no_resp_cnt);
     }
 }
 
+// Return values:
+//   0  : data received, *received_len > 0
+//   1  : idle (recv timed out with no data) - NOT an error for a keepalive link
+//  -2  : connection lost (peer closed or fatal socket error)
 static int db_keepalive_recv_raw_data(int sock, uint8_t *rx_raw_buffer, uint16_t max_size, uint16_t *received_len)
 {
-    int rx_size = 0;
-    uint8_t rx_retry_cnt = 0;
+    int rx_size;
 
-    // Receive data from socket, always from buffer start (no accumulation)
-rx_retry:
+    *received_len = 0;
+
     rx_size = recv(sock, rx_raw_buffer, max_size, 0);
-    if (rx_size <= 0) {
-        if (rx_size == 0) {
-            LOGI("%s: Connection closed by server\n", __func__);
-            return -2;
-        }
-
-        if (errno == EWOULDBLOCK || errno == EAGAIN) {
-            rx_retry_cnt++;
-            if (rx_retry_cnt > DB_KEEPALIVE_RX_MAX_RETRY_CNT) {
-                LOGE("%s: RX reaches MAX retry, err=%d\n", __func__, errno);
-                return -1;
-            }
-            goto rx_retry;
-        } else {
-            LOGE("%s: RX failed, size=%d, err=%d\n", __func__, rx_size, errno);
-            return -2;
-        }
+    if (rx_size > 0) {
+        *received_len = rx_size;
+        return 0;
     }
 
-    *received_len = rx_size;
-    return 0; // Success
+    if (rx_size == 0) {
+        LOGI("%s: Connection closed by server\n", __func__);
+        return -2;
+    }
+
+    // A recv timeout (SO_RCVTIMEO) on an idle but healthy keepalive link is
+    // expected: data only arrives as heartbeat responses. Do not treat it as a
+    // failure here; liveness is tracked by the TX response watchdog instead.
+    if (errno == EWOULDBLOCK || errno == EAGAIN) {
+        return 1;
+    }
+
+    LOGE("%s: RX failed, size=%d, err=%d\n", __func__, rx_size, errno);
+    return -2;
 }
 
 // Callback for db_pack_unpack when a complete packet is received
@@ -367,7 +371,8 @@ static void db_keepalive_unpack_callback(uint8_t *data, uint32_t length)
     // Handle keepalive response
     if (cmd->opcode == DBCMD_KEEP_ALIVE_RESPONSE) {
         LOGI("%s: Keepalive response successful\n", __func__);
-        // Keepalive successful, continue normal operation
+        // Got a response: clear the missed-response watchdog counter.
+        s_keepalive_env.keepalive_no_resp_cnt = 0;
     } else {
         // Process other commands (same callback as AP side)
         db_tx_cmd_recive_callback(data, length);
@@ -387,18 +392,16 @@ static void db_keepalive_rx_handler(void *arg)
                                           s_keepalive_env.rx_raw_buffer, 
                                           DB_KEEPALIVE_MSG_BUFFER_SIZE,
                                           &received_len);
-        if (ret < 0) {
-            if (ret == -1) {
-                LOGE("%s: Receive raw data failed\n", __func__);
-                pl_wakeup_host(POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG);
-                goto _exit;
-            }else {
-                LOGE("%s: Receive raw data failed, ret=%d\n", __func__, ret);
-                goto _exit;
-            }
+        if (ret == -2) {
+            // Connection lost (peer closed / fatal socket error): notify host.
+            LOGE("%s: Connection lost, ret=%d\n", __func__, ret);
+            pl_wakeup_host(POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG);
+            goto _exit;
         }
 
-        if (received_len == 0) {
+        // Idle timeout (ret == 1) or no payload: keep waiting for data. Link
+        // liveness is enforced by the TX missed-response watchdog.
+        if (ret != 0 || received_len == 0) {
             continue;
         }
 
@@ -515,6 +518,14 @@ static void db_keepalive_tx_handler(void *arg)
         }
 
         if (s_keepalive_env.keepalive_ongoing && s_keepalive_env.sock >= 0) {
+            // Watchdog: if the previous requests went unanswered for too many
+            // consecutive intervals, the link is dead -> wake host and stop.
+            if (s_keepalive_env.keepalive_no_resp_cnt >= DB_KEEPALIVE_MAX_NO_RESP_CNT) {
+                LOGE("%s: No keepalive response for %u consecutive requests, link dead\n",
+                     __func__, s_keepalive_env.keepalive_no_resp_cnt);
+                pl_wakeup_host(POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG);
+                break;
+            }
             db_keepalive_send_heartbeat();
         }
     }
