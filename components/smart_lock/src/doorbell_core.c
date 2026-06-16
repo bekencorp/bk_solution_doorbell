@@ -275,6 +275,8 @@ static void doorbell_message_handle(void *param)
 
                     db_info->stopping = BK_TRUE;
 
+                    doorbell_video_transfer_turn_off();
+
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     if (db_info->service == DOORBELL_SERVICE_LAN_TCP)
                     {
@@ -285,7 +287,7 @@ static void doorbell_message_handle(void *param)
                         doorbell_bk_network_transfer_deinit("udp_service");
                     }
 #endif
-                    doorbell_video_transfer_turn_off();
+
                     /* Abrupt disconnect: phone may not have sent TURN_OFF, so close
                      * camera/LCD hardware explicitly. Both are safe no-ops when
                      * already closed (video_enable/lcd_enable == false). */
