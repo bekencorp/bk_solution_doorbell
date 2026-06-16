@@ -18,13 +18,12 @@
 #define LOGD(...)   BK_LOGD(DOORBELL_KEEPALIVE_TAG, ##__VA_ARGS__)
 #define LOGV(...)   BK_LOGV(DOORBELL_KEEPALIVE_TAG, ##__VA_ARGS__)
 
-static beken_timer_t s_mm_status_check_timer = {0};
+static beken2_timer_t s_mm_status_check_timer = {0};
 static bool s_timer_started = false;
 /* Keepalive timer interval in ms, configurable via CLI "ka interval <ms>", persisted to flash */
 static uint32_t s_mm_status_check_interval_ms = MM_STATUS_CHECK_INTERVAL_MS;
 static bool s_interval_loaded_from_flash = false;
 
-static uint64_t s_last_update_timestamp = 0;
 static bool s_pending_keepalive_after_service_stop = false;
 
 static uint32_t s_pending_wakeup_cmd = 0;  // Store the command to send after service starts
@@ -33,7 +32,7 @@ static uint32_t s_pending_wakeup_cmd = 0;  // Store the command to send after se
 
 #define DOORBELL_KEEPALIVE_CLI_CMD_CNT (sizeof(s_doorbell_keepalive_commands) / sizeof(struct cli_command))
 
-static void doorbell_keepalive_mm_status_check_timer_handler(void *data);
+static void doorbell_keepalive_mm_status_check_timer_handler(void *larg, void *rarg);
 
 static void db_set_keepalive_interval(const char *interval_str)
 {
@@ -69,36 +68,19 @@ static void db_set_keepalive_interval(const char *interval_str)
         LOGW("%s: failed to save interval to flash\n", __func__);
     }
 
-    /* If timer is running, restart it with new interval */
+    /* If idle countdown is running, restart it with new interval */
     if (s_timer_started) {
-        err = rtos_stop_timer(&s_mm_status_check_timer);
+        err = rtos_oneshot_reload_timer_ex(&s_mm_status_check_timer,
+                                           s_mm_status_check_interval_ms,
+                                           doorbell_keepalive_mm_status_check_timer_handler,
+                                           NULL,
+                                           NULL);
         if (err != BK_OK) {
-            LOGE("%s: Failed to stop timer\n", __func__);
+            LOGE("%s: Failed to restart idle countdown timer: %d\n", __func__, err);
             return;
         }
-        err = rtos_deinit_timer(&s_mm_status_check_timer);
-        if (err != BK_OK) {
-            LOGE("%s: Failed to deinit timer\n", __func__);
-            return;
-        }
-        s_timer_started = false;
-
-        err = rtos_init_timer(&s_mm_status_check_timer,
-                              s_mm_status_check_interval_ms,
-                              doorbell_keepalive_mm_status_check_timer_handler,
-                              NULL);
-        if (err != BK_OK) {
-            LOGE("%s: Failed to re-init timer: %d\n", __func__, err);
-            return;
-        }
-        err = rtos_start_timer(&s_mm_status_check_timer);
-        if (err != BK_OK) {
-            LOGE("%s: Failed to restart timer: %d\n", __func__, err);
-            rtos_deinit_timer(&s_mm_status_check_timer);
-            return;
-        }
-        s_timer_started = true;
-        LOGI("%s: Timer restarted with interval %u ms\n", __func__, s_mm_status_check_interval_ms);
+        LOGI("%s: Idle countdown timer restarted with interval %u ms\n",
+             __func__, s_mm_status_check_interval_ms);
     }
 }
 
@@ -154,12 +136,10 @@ static bk_err_t doorbell_keepalive_stop_service_if_running(void)
 }
 
 
-static void doorbell_keepalive_mm_status_check_timer_handler(void *data)
+static void doorbell_keepalive_mm_status_check_timer_handler(void *larg, void *rarg)
 {
     uint32_t mm_status;
     bk_err_t ret;
-    uint64_t current_time;
-    uint64_t time_diff;
 
     // Get multimedia service status
     mm_status = doorbell_mm_service_get_status();
@@ -167,29 +147,7 @@ static void doorbell_keepalive_mm_status_check_timer_handler(void *data)
 
     // Check if there are any active multimedia services
     if (mm_status == 0) {
-        // Get current time
-        current_time = rtos_get_time();
-        
-        // Check if last update timestamp is valid (non-zero)
-        if (s_last_update_timestamp != 0) {
-            // Calculate time difference
-            if (current_time >= s_last_update_timestamp) {
-                time_diff = current_time - s_last_update_timestamp;
-            } else {
-                // Handle time wrap-around
-                time_diff = (UINT64_MAX - s_last_update_timestamp) + current_time + 1;
-            }
-
-            LOGD("%s: Time since last update: %llu ms\n", __func__, (unsigned long long)time_diff);
-
-            if (time_diff < MM_STATUS_CHECK_MIN_INTERVAL_MS) {
-                LOGI("%s: Last update was %llu ms ago (< %d ms), skipping keepalive\n",
-                     __func__, (unsigned long long)time_diff, MM_STATUS_CHECK_MIN_INTERVAL_MS);
-                return;
-            }
-        }
-
-        LOGI("%s: No active multimedia services, preparing to send keepalive command\n", __func__);
+        LOGI("%s: Idle countdown expired, preparing to send keepalive command\n", __func__);
 
         // Try to stop service if it's running (TCP or UDP)
         ret = doorbell_keepalive_stop_service_if_running();
@@ -427,11 +385,7 @@ bk_err_t doorbell_keepalive_start_mm_status_check(void)
 {
     int err;
     uint32_t flash_interval;
-
-    if (s_timer_started) {
-        LOGW("%s: Timer already started\n", __func__);
-        return BK_OK;
-    }
+    uint32_t mm_status;
 
     /* Load interval from flash on first start (after power-on) */
     if (!s_interval_loaded_from_flash) {
@@ -444,35 +398,58 @@ bk_err_t doorbell_keepalive_start_mm_status_check(void)
         }
     }
 
-    // Initialize timer with current interval (from flash or default)
-    err = rtos_init_timer(&s_mm_status_check_timer,
-                          s_mm_status_check_interval_ms,
-                          doorbell_keepalive_mm_status_check_timer_handler,
-                          NULL);
+    mm_status = doorbell_mm_service_get_status();
+    if (mm_status != 0) {
+        LOGD("%s: Multimedia services are active (status: 0x%x), skip idle countdown\n",
+             __func__, mm_status);
+        return BK_OK;
+    }
+
+    if (s_timer_started) {
+        if (rtos_is_oneshot_timer_running(&s_mm_status_check_timer)) {
+            LOGD("%s: Idle countdown timer already running\n", __func__);
+            return BK_OK;
+        }
+
+        err = rtos_oneshot_reload_timer_ex(&s_mm_status_check_timer,
+                                           s_mm_status_check_interval_ms,
+                                           doorbell_keepalive_mm_status_check_timer_handler,
+                                           NULL,
+                                           NULL);
+        if (err != BK_OK) {
+            LOGE("%s: Failed to reload idle countdown timer: %d\n", __func__, err);
+            return BK_FAIL;
+        }
+
+        LOGI("%s: Idle countdown timer reloaded (interval: %u ms)\n",
+             __func__, s_mm_status_check_interval_ms);
+        return BK_OK;
+    }
+
+    // Initialize one-shot timer with current interval (from flash or default)
+    err = rtos_init_oneshot_timer(&s_mm_status_check_timer,
+                                  s_mm_status_check_interval_ms,
+                                  doorbell_keepalive_mm_status_check_timer_handler,
+                                  NULL,
+                                  NULL);
     if (err != BK_OK) {
         LOGE("%s: Failed to init timer: %d\n", __func__, err);
         return BK_FAIL;
     }
 
-    // Start timer
-    err = rtos_start_timer(&s_mm_status_check_timer);
+    // Start idle countdown timer
+    err = rtos_start_oneshot_timer(&s_mm_status_check_timer);
     if (err != BK_OK) {
         LOGE("%s: Failed to start timer: %d\n", __func__, err);
-        rtos_deinit_timer(&s_mm_status_check_timer);
+        rtos_deinit_oneshot_timer(&s_mm_status_check_timer);
         return BK_FAIL;
     }
 
     s_timer_started = true;
-    LOGI("%s: Multimedia status check timer started (interval: %u ms)\n",
+    LOGI("%s: Idle countdown timer started (interval: %u ms)\n",
          __func__, s_mm_status_check_interval_ms);
 
     return BK_OK;
-}
-
-void doorbell_keepalive_update_timestamp(void)
-{
-    s_last_update_timestamp = rtos_get_time();
-    LOGD("%s: Updated timestamp to %llu ms\n", __func__, (unsigned long long)s_last_update_timestamp);
 }
 
 void doorbell_keepalive_send_keepalive(void)
@@ -523,25 +500,27 @@ bk_err_t doorbell_keepalive_stop_mm_status_check(void)
     int err;
 
     if (!s_timer_started) {
-        LOGW("%s: Timer not started\n", __func__);
+        LOGD("%s: Idle countdown timer not started\n", __func__);
         return BK_OK;
     }
 
-    // Stop timer
-    err = rtos_stop_timer(&s_mm_status_check_timer);
-    if (err != BK_OK) {
-        LOGE("%s: Failed to stop timer: %d\n", __func__, err);
+    // Stop timer if it is still counting down
+    if (rtos_is_oneshot_timer_running(&s_mm_status_check_timer)) {
+        err = rtos_stop_oneshot_timer(&s_mm_status_check_timer);
+        if (err != BK_OK) {
+            LOGE("%s: Failed to stop timer: %d\n", __func__, err);
+        }
     }
 
     // Deinitialize timer
-    err = rtos_deinit_timer(&s_mm_status_check_timer);
+    err = rtos_deinit_oneshot_timer(&s_mm_status_check_timer);
     if (err != BK_OK) {
         LOGE("%s: Failed to deinit timer: %d\n", __func__, err);
     }
 
     s_timer_started = false;
     s_mm_status_check_timer.handle = NULL;
-    LOGI("%s: Multimedia status check timer stopped\n", __func__);
+    LOGI("%s: Idle countdown timer stopped\n", __func__);
 
     return BK_OK;
 }

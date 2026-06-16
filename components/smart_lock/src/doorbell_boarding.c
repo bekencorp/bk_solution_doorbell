@@ -86,10 +86,6 @@ void doorbell_boarding_operation_handle(uint16_t opcode, uint16_t length, uint8_
 {
     LOGD("%s, opcode: %04X, length: %u\n", __func__, opcode, length);
 
-    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-    doorbell_keepalive_update_timestamp();
-    #endif
-
     switch (opcode)
     {
         case BOARDING_OP_STATION_START:

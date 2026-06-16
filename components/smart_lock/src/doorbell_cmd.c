@@ -206,9 +206,6 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
     cmd.length = CHECK_ENDIAN_UINT32(ptr->length);
 
     LOGD("%s, opcode: %u, param: %u, length: %u\n", __func__, cmd.opcode, cmd.param, cmd.length);
-    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-    doorbell_keepalive_update_timestamp();
-    #endif
 
     switch (cmd.opcode)
     {
@@ -536,12 +533,18 @@ uint32_t doorbell_mm_service_vote(mm_status_bit_t service_bit, bool vote_add)
         // Add vote (set bit)
         mm_service_status |= bit_mask;
         LOGD("%s: Service bit %d vote added, status: 0x%x\n", __func__, service_bit, mm_service_status);
+        doorbell_keepalive_stop_mm_status_check();
     }
     else
     {
         // Remove vote (clear bit)
         mm_service_status &= ~bit_mask;
         LOGD("%s: Service bit %d vote removed, status: 0x%x\n", __func__, service_bit, mm_service_status);
+        if (mm_service_status == 0)
+        {
+            LOGI("%s: All multimedia services are idle, start keepalive countdown\n", __func__);
+            doorbell_keepalive_start_mm_status_check();
+        }
     }
 
     LOGD("%s: status=0x%x\n", __func__, mm_service_status);
