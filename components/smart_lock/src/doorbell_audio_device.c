@@ -7,6 +7,7 @@
 
 #include "doorbell_cmd.h"
 #include "doorbell_audio_device.h"
+#include "audio_param_hooks.h"
 
 
 #include <components/bk_voice_service.h>
@@ -35,7 +36,6 @@
 extern const doorbell_service_interface_t *doorbell_current_service;
 
 db_audio_device_info_t *gl_db_audio_device_info = NULL;
-
 
 int doorbell_voice_send_callback(unsigned char *data, unsigned int len, void *args)
 {
@@ -473,6 +473,9 @@ int doorbell_audio_turn_off(void)
 
     if (gl_db_audio_device_info->voice_handle)
     {
+#if CONFIG_AUD_PARAM_CTRL
+        media_audio_param_unbind_voc_handle();
+#endif
         bk_voice_stop(gl_db_audio_device_info->voice_handle);
     }
 
@@ -606,6 +609,8 @@ int doorbell_audio_turn_on(audio_parameters_t *parameters)
             voice_cfg.spk_cfg.onboard_spk_cfg.sample_rate[AUD_DAC_SOURCE_A2DP] = spk_sample_rate;
             voice_cfg.spk_cfg.onboard_spk_cfg.frame_size[AUD_DAC_SOURCE_A2DP]  = spk_sample_rate * 2 * 20 / 1000; //one frame size(20ms)
         }
+        voice_cfg.spk_cfg.onboard_spk_cfg.dig_gain = -16.0f;
+        voice_cfg.spk_cfg.onboard_spk_cfg.ana_gain = 4;
         #else
         voice_cfg.spk_cfg.onboard_spk_cfg.sample_rate = spk_sample_rate;
         voice_cfg.spk_cfg.onboard_spk_cfg.frame_size  = spk_sample_rate * 2 * 20 / 1000; //one frame size(20ms)
@@ -623,6 +628,16 @@ int doorbell_audio_turn_on(audio_parameters_t *parameters)
         voice_cfg.mic_cfg.onboard_mic_cfg.adc_cfg.aec_en = parameters->aec;
         #endif
     }
+
+#if CONFIG_VOICE_SERVICE_EQ
+    voice_cfg.eq_en = true;
+    if (voice_cfg.eq_en)
+    {
+        eq_algorithm_cfg_t eq_cfg = DEFAULT_EQ_ALGORITHM_CONFIG();
+        eq_cfg.eq_mode = EQ_MODE_SOFTWARE;
+        voice_cfg.eq_cfg.eq_alg_cfg = eq_cfg;
+    }
+#endif
 
     if (parameters->aec == 1)
     {
@@ -766,6 +781,11 @@ int doorbell_audio_turn_on(audio_parameters_t *parameters)
         goto error;
     }
 
+#if CONFIG_AUD_PARAM_CTRL
+    /* Bind only after the pipeline is fully started */
+    media_audio_param_bind_voc_handle(gl_db_audio_device_info->voice_handle, spk_sample_rate);
+#endif
+
     gl_db_audio_device_info->audio_enable = BK_TRUE;
 
     #if 0
@@ -802,6 +822,9 @@ error:
 
     if (gl_db_audio_device_info->voice_handle)
     {
+#if CONFIG_AUD_PARAM_CTRL
+        media_audio_param_unbind_voc_handle();
+#endif
         bk_voice_stop(gl_db_audio_device_info->voice_handle);
     }
 
