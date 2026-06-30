@@ -207,6 +207,10 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 
     LOGD("%s, opcode: %u, param: %u, length: %u\n", __func__, cmd.opcode, cmd.param, cmd.length);
 
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    doorbell_keepalive_stop_mm_status_check();
+#endif
+
     switch (cmd.opcode)
     {
         case DBCMD_SET_SERVICE_TYPE:
@@ -268,6 +272,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 
         case DBCMD_SET_CAMERA_TURN_ON:
         {
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+            bool camera_vote_was_set = (doorbell_mm_service_get_status() & MM_STATUS_CAMERA_MASK) != 0;
+            doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, true);
+#endif
+
             if (cmd.length != sizeof(camera_parameters_t))
             {
                 LOGV("error\n");
@@ -322,9 +331,9 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             int ret = (cam_ret == BK_OK && trans_ret == BK_OK) ? BK_OK : BK_FAIL;
 
             #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-            if (ret == BK_OK)
+            if (ret != BK_OK && !camera_vote_was_set)
             {
-                doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, true);
+                doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, false);
             }
             #endif
 
@@ -360,6 +369,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 
         case DBCMD_SET_AUDIO_TURN_ON:
         {
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+            bool audio_vote_was_set = (doorbell_mm_service_get_status() & MM_STATUS_AUDIO_MASK) != 0;
+            doorbell_mm_service_vote(MM_STATUS_AUDIO_BIT, true);
+#endif
+
 #ifdef CONFIG_VOICE_SERVICE
             audio_parameters_t parameters;
 
@@ -378,9 +392,9 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             int ret = BK_FAIL;
 #endif
             #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-            if (ret == BK_OK)
+            if (ret != BK_OK && !audio_vote_was_set)
             {
-                doorbell_mm_service_vote(MM_STATUS_AUDIO_BIT, true);
+                doorbell_mm_service_vote(MM_STATUS_AUDIO_BIT, false);
             }
             #endif
 
@@ -415,6 +429,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 
         case DBCMD_SET_LCD_TURN_ON:
         {
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+            bool lcd_vote_was_set = (doorbell_mm_service_get_status() & MM_STATUS_LCD_MASK) != 0;
+            doorbell_mm_service_vote(MM_STATUS_LCD_BIT, true);
+#endif
+
             //display_parameters_t parameters = {0};
             //STREAM_TO_UINT16(parameters.id, p);
             //STREAM_TO_UINT16(parameters.rotate_angle, p);
@@ -426,9 +445,9 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
                 LOGE("doorbell_display_turn_on failed\n");
             }
             #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-            if (ret == BK_OK)
+            if (ret != BK_OK && !lcd_vote_was_set)
             {
-                doorbell_mm_service_vote(MM_STATUS_LCD_BIT, true);
+                doorbell_mm_service_vote(MM_STATUS_LCD_BIT, false);
             }
             #endif
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
@@ -498,6 +517,13 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
         }
         break;
     }
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    if (doorbell_mm_service_get_status() == 0)
+    {
+        doorbell_keepalive_start_mm_status_check();
+    }
+#endif
 }
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE

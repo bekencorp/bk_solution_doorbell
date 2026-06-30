@@ -455,11 +455,20 @@ bk_err_t doorbell_keepalive_start_mm_status_check(void)
 void doorbell_keepalive_send_keepalive(void)
 {
     bk_err_t ret = BK_OK;
+    uint32_t mm_status;
     ntwk_server_net_info_t net_info;
 
     // Check if there's a pending keepalive request
     if (!s_pending_keepalive_after_service_stop) {
         LOGW("%s: No pending keepalive request, returning\n", __func__);
+        return;
+    }
+
+    mm_status = doorbell_mm_service_get_status();
+    if (mm_status != 0) {
+        s_pending_keepalive_after_service_stop = false;
+        LOGI("%s: Multimedia services are active (status: 0x%x), skip keepalive\n",
+             __func__, mm_status);
         return;
     }
 
