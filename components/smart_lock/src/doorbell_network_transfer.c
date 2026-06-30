@@ -394,6 +394,7 @@ bk_err_t doorbell_network_transfer_stop(void)
     LOGI("%s start\n", __func__);
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    reset_chan_connected_mask();
     reset_chan_stopped_mask();
 #endif
 
