@@ -385,7 +385,20 @@ bk_err_t doorbell_get_keepalive_interval_from_flash(uint32_t *interval_ms)
 
 bk_err_t doorbell_del_keepalive_interval_from_flash(void)
 {
+    uint32_t interval_ms;
+
+    if (bk_get_env_enhance("doorbell_keepalive_interval", &interval_ms, sizeof(interval_ms)) <= 0)
+    {
+        LOGI("Keepalive interval not found in flash, skip delete\n");
+        return BK_OK;
+    }
+
     bk_err_t ret = bk_set_env_enhance("doorbell_keepalive_interval", NULL, 0);
+    if (ret == EF_ENV_NAME_ERR)
+    {
+        LOGI("Keepalive interval not found in flash, skip delete\n");
+        return BK_OK;
+    }
     if (ret != BK_OK)
     {
         LOGE("Failed to del keepalive interval from flash\n");

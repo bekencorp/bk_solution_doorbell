@@ -263,9 +263,7 @@ static dbevt_t handle_stop_event(db_ntwk_type_t ntwk_type, chan_type_t chan_type
         case NTWK_TRANS_CHAN_CTRL:
         {
             if (ntwk_type == DB_NTWK_TYPE_TCP) {
-                return (param != ENOTCONN) ? DBEVT_REMOTE_DEVICE_DISCONNECTED : 0;
             } else if (ntwk_type == DB_NTWK_TYPE_UDP) {
-                return (param != ENOTCONN) ? DBEVT_REMOTE_DEVICE_DISCONNECTED : 0;
             } else if (ntwk_type == DB_NTWK_TYPE_CS2) {
 
                 return DBEVT_REMOTE_DEVICE_DISCONNECTED;
