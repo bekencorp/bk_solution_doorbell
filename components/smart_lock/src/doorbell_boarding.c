@@ -9,7 +9,6 @@
 #include "doorbell_network.h"
 #include "network_transfer.h"
 #include "components/bluetooth/bk_ble.h"
-#include "components/bluetooth/bk_dm_ble.h"
 #include "components/bluetooth/bk_dm_bluetooth.h"
 #include <modules/wdrv_common.h>
 #include "wdrv_cntrl.h"
