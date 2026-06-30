@@ -28,7 +28,7 @@ list(APPEND srcs
 list(APPEND priv_req bk_encoder bk_camera)
 endif()
 
-list(APPEND priv_req unity include avdk_utils avdk_driver bk_peripheral bk_h264d bk_h264e bk_encoder media_service bk_network_transfer)
+list(APPEND priv_req unity include avdk_utils avdk_driver bk_peripheral bk_encoder media_service bk_network_transfer)
 
 armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" PRIV_REQUIRES "${priv_req}")
 
