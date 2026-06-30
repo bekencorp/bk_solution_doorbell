@@ -35,9 +35,9 @@ typedef struct
 } h264e_stream_project_ctx_t;
 
 static h264e_stream_project_ctx_t s_project_ctx = {
-    .fps = 25,
-    .width = 1280,
-    .height = 720,
+    .fps = 20,
+    .width = 2304,
+    .height = 1296,
     .bitrate_kbps = 1200,
 };
 
@@ -104,12 +104,13 @@ static void h264e_stream_project_log_pc_h264e_connect_info(void)
 
 static bk_err_t h264e_stream_project_validate_resolution(uint16_t width, uint16_t height)
 {
-    if ((width == 1280 && height == 720) ||
+    if ((width == 2304 && height == 1296) ||
+        (width == 1280 && height == 720) ||
         (width == 1920 && height == 1080)) {
         return BK_OK;
     }
 
-    LOGE("unsupported resolution %ux%u (supported: 1280x720, 1920x1080)\n", width, height);
+    LOGE("unsupported resolution %ux%u (supported: 2304x1296, 1280x720, 1920x1080)\n", width, height);
     return BK_ERR_PARAM;
 }
 
@@ -132,7 +133,7 @@ static void h264e_stream_project_fill_camera_config(camera_board_config_t *confi
     config->isp.mp_width = width;
     config->isp.mp_height = height;
 
-    config->mipi.sensor_fps = fps ? fps : 25;
+    config->mipi.sensor_fps = fps ? fps : 20;
     config->isp.mp_enable = true;
     config->isp.mp_flexa = true;
     config->isp.mp_format = BK_PIXEL_FORMAT_NV12;
@@ -154,7 +155,7 @@ static void h264e_stream_project_parse_video_args(int argc, char **argv, int sta
         } else {
             *fps = (uint16_t)os_strtoul(argv[i], NULL, 10);
             if (*fps == 0) {
-                *fps = 25;
+                *fps = 20;
             }
         }
     }
@@ -169,7 +170,7 @@ static bk_err_t h264e_stream_project_set_video_profile(uint16_t width, uint16_t 
 
     s_project_ctx.width = width;
     s_project_ctx.height = height;
-    s_project_ctx.fps = fps ? fps : 25;
+    s_project_ctx.fps = fps ? fps : 20;
     return BK_OK;
 }
 

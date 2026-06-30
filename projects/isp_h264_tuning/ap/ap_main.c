@@ -57,12 +57,12 @@ int main(void)
         LOGE("media preview Wi-Fi STA auto connect failed\n");
     }
 
-    if (media_preview_server_start(1920, 1080, 25) != BK_OK) {
+    if (media_preview_server_start(2304, 1296, 20) != BK_OK) {
         LOGE("media preview server auto start failed\n");
     }
 
     LOGI("media preview example ready.\n");
-    LOGI("  Unified server : ap_cmd media_preview start 1080p 25\n");
+    LOGI("  Unified server : default 2304x1296 @ 20fps\n");
     LOGI("  PC selects H264E or ISP by JSON-RPC method\n");
     return 0;
 }

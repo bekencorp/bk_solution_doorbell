@@ -28,9 +28,9 @@ typedef struct
 } isp_frame_project_ctx_t;
 
 static isp_frame_project_ctx_t s_isp_project_ctx = {
-    .fps = 25,
-    .width = 1280,
-    .height = 720,
+    .fps = 20,
+    .width = 2304,
+    .height = 1296,
 };
 
 static void isp_frame_project_fill_camera_config(camera_board_config_t *config,
@@ -52,7 +52,7 @@ static void isp_frame_project_fill_camera_config(camera_board_config_t *config,
     config->isp.mp_width = cap->isp_w;
     config->isp.mp_height = cap->isp_h;
 
-    config->mipi.sensor_fps = fps ? fps : 25;
+    config->mipi.sensor_fps = fps ? fps : 20;
     config->isp.mp_enable = true;
     /* frame mode (flexa off): required for app_isp_camera_channel_read used by preview */
     config->isp.mp_flexa = false;
@@ -63,12 +63,13 @@ static void isp_frame_project_fill_camera_config(camera_board_config_t *config,
 
 static bk_err_t isp_frame_project_validate_resolution(uint16_t width, uint16_t height)
 {
-    if ((width == 1280 && height == 720) ||
+    if ((width == 2304 && height == 1296) ||
+        (width == 1280 && height == 720) ||
         (width == 1920 && height == 1080)) {
         return BK_OK;
     }
 
-    LOGE("unsupported resolution %ux%u (supported: 1280x720, 1920x1080)\n", width, height);
+    LOGE("unsupported resolution %ux%u (supported: 2304x1296, 1280x720, 1920x1080)\n", width, height);
     return BK_ERR_PARAM;
 }
 
@@ -86,7 +87,7 @@ static void isp_frame_project_parse_video_args(int argc, char **argv, int start_
         } else {
             *fps = (uint16_t)os_strtoul(argv[i], NULL, 10);
             if (*fps == 0) {
-                *fps = 25;
+                *fps = 20;
             }
         }
     }
@@ -101,7 +102,7 @@ static bk_err_t isp_frame_project_set_video_profile(uint16_t width, uint16_t hei
 
     s_isp_project_ctx.width = width;
     s_isp_project_ctx.height = height;
-    s_isp_project_ctx.fps = fps ? fps : 25;
+    s_isp_project_ctx.fps = fps ? fps : 20;
     return BK_OK;
 }
 

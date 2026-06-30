@@ -41,19 +41,20 @@ typedef struct
 } media_preview_server_ctx_t;
 
 static media_preview_server_ctx_t s_media_preview_ctx = {
-    .width = 1920,
-    .height = 1080,
-    .fps = 25,
+    .width = 2304,
+    .height = 1296,
+    .fps = 20,
 };
 
 static bk_err_t media_preview_validate_resolution(uint16_t width, uint16_t height)
 {
-    if ((width == 1280 && height == 720) ||
+    if ((width == 2304 && height == 1296) ||
+        (width == 1280 && height == 720) ||
         (width == 1920 && height == 1080)) {
         return BK_OK;
     }
 
-    LOGE("unsupported resolution %ux%u (supported: 1280x720, 1920x1080)\n", width, height);
+    LOGE("unsupported resolution %ux%u (supported: 2304x1296, 1280x720, 1920x1080)\n", width, height);
     return BK_ERR_PARAM;
 }
 
@@ -478,7 +479,7 @@ bk_err_t media_preview_server_start(uint16_t width, uint16_t height, uint16_t fp
 
     s_media_preview_ctx.width = width;
     s_media_preview_ctx.height = height;
-    s_media_preview_ctx.fps = fps ? fps : 25;
+    s_media_preview_ctx.fps = fps ? fps : 20;
 
     ret = bk_tcp_trans_service_init("media_preview_tcp_service");
     if (ret != BK_OK)
@@ -588,7 +589,7 @@ static void cli_media_preview_cmd(char *pcWriteBuffer, int xWriteBufferLen, int 
             fps = (uint16_t)os_strtoul(argv[i], NULL, 10);
             if (fps == 0)
             {
-                fps = 25;
+                fps = 20;
             }
         }
     }
