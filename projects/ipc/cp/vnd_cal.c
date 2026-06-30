@@ -31,6 +31,7 @@
  * or update here directly before/without iTest
  */
 float target_pwr_ble  = 6.0; //2G4 BLE target power
+float target_polar_pwr_ble = 2.0; //2G4 BLE Polar target power
 float target_pwr_thread = 10.0; //2.4G Thread target power (802.15.4 ch11-26)
 float target_pwr_11b  = 18.0; //2G4 11B target power
 float target_pwr_11g  = 16.0; //2G4 11G target power
@@ -315,6 +316,12 @@ const TXPWR_CAL_ST gtxpwr_tab_def_ble[TXPWR_CAL_2G_MAX] = {
     INIT_TXPWR_VALUE(1,  51),  // ch0 2402  inused
     INIT_TXPWR_VALUE(20, 47),  // ch19 2440 inused
     INIT_TXPWR_VALUE(40, 46),  // ch39 2480 inused
+};
+
+const TXPWR_CAL_ST gtxpwr_tab_def_polar_ble[TXPWR_CAL_2G_MAX] = {
+    INIT_TXPWR_VALUE(1,  29),  // ch0 2402  inused
+    INIT_TXPWR_VALUE(20, 25),  // ch19 2440 inused
+    INIT_TXPWR_VALUE(40, 24),  // ch39 2480 inused
 };
 
 /* IEEE 802.15.4 2.4G logical ch 11/19/26 (align g_dif_g_thread_ch*); same strip count as BLE/WiFi 2G */
