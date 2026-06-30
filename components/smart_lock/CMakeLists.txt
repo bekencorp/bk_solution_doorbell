@@ -38,7 +38,7 @@ if (CONFIG_VOICE_SERVICE)
 	)
 endif()
 
-set(req media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bt multimedia_device_service bk_peripheral media_service bk_asr_service bk_vfs)
+set(req media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bk_bluetooth multimedia_device_service bk_peripheral media_service bk_asr_service bk_vfs)
 
 armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" REQUIRES "${req}"
 )
