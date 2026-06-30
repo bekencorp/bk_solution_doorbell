@@ -261,6 +261,7 @@ static void doorbell_message_handle(void *param)
                     }
                     #else
                     doorbell_keepalive_on_service_start_success();
+                    doorbell_keepalive_start_mm_status_check();
                     #endif
                 }
                 break;

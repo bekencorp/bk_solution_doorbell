@@ -455,9 +455,6 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
         case DBCMD_GET_SUPPORTED_LCD_DEVICES:
         {
             doorbell_get_supported_lcd_devices(cmd.opcode);
-            #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-            doorbell_keepalive_start_mm_status_check();
-            #endif
         }
         break;
 
@@ -492,7 +489,6 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
         {
             LOGD("DBCMD_WAKE_UP_REQUEST\n");
             doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
-            doorbell_keepalive_start_mm_status_check();
         }
         break;
 #endif
