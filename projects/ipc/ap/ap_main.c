@@ -37,8 +37,8 @@ int main(void)
     camera_board.mipi.sensor_fps = 20;
     camera_board.isp.mp_enable = true;
     camera_board.isp.mp_flexa = true;
-    camera_board.isp.mp_width = 1920;
-    camera_board.isp.mp_height = 1080;
+    camera_board.isp.mp_width = 2304;
+    camera_board.isp.mp_height = 1296;
     camera_board.isp.mp_format = BK_PIXEL_FORMAT_NV12;
     camera_board.isp.sp_enable = false;
     camera_board.isp.sp_flexa = false;
