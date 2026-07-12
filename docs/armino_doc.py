@@ -720,7 +720,7 @@ def main(argv):
 	parser.add_argument('--clean', type=bool, default=False)
 	parser.add_argument('--target', type=str, default="all")
 	parser.add_argument('--type', type=str, default="html")
-	parser.add_argument('--version', type=str, default="4.0.1")
+	parser.add_argument('--version', type=str, default="v4.0.1")
 	args = parser.parse_args()
 
 	root_path = os.getcwd()
