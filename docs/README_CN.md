@@ -1,47 +1,52 @@
-门锁demo
--------------------
+# Doorbell 解决方案（BK7259）
 
-概述
--------------------
+## 概述
 
-    此为门锁解决方案，支持实时音视频传输，和uvc摄像头的图像实时LCD显示。
+BK7259 SMP 门铃方案，包含可视门铃、低功耗保活门铃、无屏 IPC 及 ISP/H264E 联调工程。
 
-工程编译
--------------------
+| 工程 | 说明 |
+| --- | --- |
+| `doorbell` | 可视门铃：MIPI/UVC、H.264 图传、MIPI LCD、BLE 配网 |
+| `doorbell_lp` | 在 doorbell 基础上增加 AP 掉电、CP TCP 保活 |
+| `ipc` | 无屏 IPC：SC3336 2304×1296 |
+| `isp_h264_tuning` | ISP / H264E PC 端图像质量联调 |
 
-- 此工程依赖： ``bk_avdk_smp_main``。编译时需要下载 ``bk_avdk_smp_main`` 代码。
-- 编译方法：在doorbell方案下： ``./projects/doorbell``，下编译。(doorviewer方案一样)
-- 编译之前需要先修改Makefile文件（./projects/doorbell/Makefile），将依赖的源码映射到bk_avdk_smp_main上，参考如下：
+各工程详细说明见 `projects/<name>/README_CN.md`。
 
-.. code-block:: makefile
+## 编译
 
-    # 映射依赖的源码到bk_avdk_smp_main上
-    SDK_DIR ?= $(abspath ../..)
+Solution 依赖 AVDK SDK（`bk_avdk_smp`）。SDK 需与本 solution 同级，或通过 `SDK_DIR` 指定。
 
-    # change to
-    SDK_DIR = /home/user.name/bk_avdk_smp_main
+```bash
+cd projects/doorbell
+./dbuild.sh make bk7259 PROJECT=doorbell
+```
 
-- 编译命令： ``make bk7258``
-- 上面是BK7258的编译命令，编译完成后，会生成bin文件件，路径： ``./projects/doorbell/build/bk7258/doorbell/package/all-app.bin``。
-- 烧录此固件到BK7258上。
+显式指定 SDK 路径：
 
-工程演示
-----------------------
+```bash
+SDK_DIR=/abs/path/to/bk_avdk_smp ./dbuild.sh make bk7259 PROJECT=doorbell
+```
 
-1. 从博通集成官网地址下载IOT APK进行使用： <https://dl.bekencorp.com/apk/BekenIot.apk>
+产物路径：`projects/<name>/build/bk7259/<name>/package/all-app.bin`
 
-2. 自行创建账号，并完成登录
+## 演示
 
-3. 添加设备，选择： `可视门铃` ，DL设备存在01-18，和DEBUG，doorbell建议先选择 `BK7258_DL_01` 进行尝试使用。点进去后里面详细介绍了使用的外设。doorviewer建议选择 `BK7258_DL_18` 进行尝试使用
+1. 下载 APK：<https://dl.bekencorp.com/apk/BekenIot.apk>
+2. 注册登录，添加设备 → `可视门铃`
+3. 选择 2.4G Wi-Fi，BLE 配网
+4. 配网完成后自动开启摄像头与 H.264 图传（doorbell 默认 MIPI 1920×1080）
+5. LCD 与音频通过 APK 按钮控制
 
-4. `开始添加`，选择非5G的WiFi，连接成功后，点击下一步，开始通过蓝牙进行配网
+> 测试前请确认 MIPI 摄像头、MIPI LCD、Speaker、Mic 已接入；使用 UVC 时需接 USB。
 
-5. 检查扫描到的设备蓝牙广播，点击IP地址匹配的进行连接，会自动完成100%的配网
+## 文档
 
-6. 配网完成之后会自动打开UVC摄像头，且打开网络图传，doorbell传输的格式是H.264，doorviewer传输的格式是MJPEG，图像的分辨率为864X480
+Sphinx 文档位于 `docs/bk7259/`。生成 HTML：
 
-7. LCD屏幕上暂未显示，板载语音也未显示，通过手机APK上的按钮可以选择打开和关闭
+```bash
+cd docs
+make doc
+```
 
-.. note::
-
-    注意使用这些外设之前，硬件环境已经搭建好，UVC已经插入到BK7258的USB接口上，LCD显示屏也已经接上，语音相关的Speaker和Mic也已经接上，否则测试相关功能会失败或者无法展示
+输出目录：`docs/build/doc/bk7259/`。
