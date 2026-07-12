@@ -122,6 +122,9 @@ avdk_err_t encode_frame_que_deinit(void)
             LOGE("%s, %d, pop encode frame from ready queue failed\n", __func__, __LINE__);
             break;
         }
+        if (frame == NULL) {
+            continue;
+        }
         bk_frame_buffer_free(frame->frame);
         os_free(frame);
     }
@@ -155,6 +158,36 @@ avdk_err_t encode_ready_frame_que_push(frame_buffer_t *frame)
     ret = rtos_push_to_queue(&encode_frame_queue->ready_queue, &frame, BEKEN_NO_WAIT);
     if (ret != AVDK_ERR_OK) {
         LOGE("%s, %d, push encode frame to ready queue failed\n", __func__, __LINE__);
+    }
+
+    rtos_unlock_mutex(&encode_frame_queue->mutex);
+
+    return ret;
+}
+
+avdk_err_t encode_ready_frame_que_wakeup(void)
+{
+    avdk_err_t ret = AVDK_ERR_OK;
+    frame_buffer_t *frame = NULL;
+    encode_frame_queue_t *encode_frame_queue = s_encode_frame_queue;
+
+    if (encode_frame_queue == NULL) {
+        return AVDK_ERR_OK;
+    }
+
+    rtos_lock_mutex(&encode_frame_queue->mutex);
+    if (encode_frame_queue->enable == 0) {
+        rtos_unlock_mutex(&encode_frame_queue->mutex);
+        return AVDK_ERR_OK;
+    }
+
+    /*
+     * Push a NULL sentinel to wake the decoder if it is blocked in ready_queue pop.
+     * The decoder checks its stop flag and exits instead of treating it as a frame.
+     */
+    ret = rtos_push_to_queue(&encode_frame_queue->ready_queue, &frame, BEKEN_NO_WAIT);
+    if (ret != AVDK_ERR_OK) {
+        LOGV("%s, %d, wakeup encode ready queue failed\n", __func__, __LINE__);
     }
 
     rtos_unlock_mutex(&encode_frame_queue->mutex);

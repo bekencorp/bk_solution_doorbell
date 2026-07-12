@@ -147,6 +147,9 @@ static void app_decode_thread_entry(void *arg)
         if (encode_buffer == NULL) {
             encode_buffer = encode_ready_frame_que_pop(2000); // 2000ms timeout
             if (encode_buffer == NULL) {
+                if (decoder_config->task_running == 0) {
+                    break;
+                }
                 LOGE("%s, %d, get encode buffer from queue failed\n", __func__, __LINE__);
                 continue;
             }
@@ -394,6 +397,7 @@ avdk_err_t app_jpeg_decode_close(void)
     LOGD("%s, %d, decode turn off start\n", __func__, decoder_config->task_running);
 
     decoder_config->task_running = 0;
+    encode_ready_frame_que_wakeup();
     rtos_get_semaphore(&decoder_config->decode_sem, BEKEN_WAIT_FOREVER);
 
     if (decoder_config->input_format == BK_IMAGE_FORMAT_MJPEG) {
