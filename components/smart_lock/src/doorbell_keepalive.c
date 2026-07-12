@@ -143,6 +143,11 @@ static bk_err_t doorbell_keepalive_stop_service_if_running(void)
 
 static void doorbell_keepalive_mm_status_check_timer_handler(void *larg, void *rarg)
 {
+#if CONFIG_DOORBELL_KEEPALIVE_ALWAYS_ON
+    LOGI("%s: Always-online mode enabled, skip AP power-down keepalive\n", __func__);
+    return;
+#endif
+
     uint32_t mm_status;
     bk_err_t ret;
 
@@ -398,6 +403,11 @@ void doorbell_keepalive_handle_wakeup_reason(void)
 
 bk_err_t doorbell_keepalive_start_mm_status_check(void)
 {
+#if CONFIG_DOORBELL_KEEPALIVE_ALWAYS_ON
+    LOGI("%s: Always-online mode enabled, skip idle countdown\n", __func__);
+    return BK_OK;
+#endif
+
     int err;
     uint32_t flash_interval;
     uint32_t mm_status;
@@ -469,6 +479,12 @@ bk_err_t doorbell_keepalive_start_mm_status_check(void)
 
 void doorbell_keepalive_send_keepalive(void)
 {
+#if CONFIG_DOORBELL_KEEPALIVE_ALWAYS_ON
+    s_keepalive_env.pending_keepalive_after_service_stop = false;
+    LOGI("%s: Always-online mode enabled, skip AP power-down keepalive\n", __func__);
+    return;
+#endif
+
     bk_err_t ret = BK_OK;
     uint32_t mm_status;
     ntwk_server_net_info_t net_info;

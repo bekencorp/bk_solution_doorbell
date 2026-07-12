@@ -12,6 +12,15 @@ menu "Smart Lock"
             Builds doorbell camera/media with kvs_service transport. Enable CONFIG_KVS_NTWK_BRIDGE
             and KVS/AWS options in the project defconfig.
 
+    config DOORBELL_KEEPALIVE_ALWAYS_ON
+        bool "Doorbell keep network service always online"
+        default n
+        depends on NTWK_CLIENT_SERVICE_ENABLE
+        help
+            Keep the doorbell network service online after multimedia services
+            become idle. When disabled, the normal idle 10s AP power-down
+            keepalive flow is used.
+
     choice H264_QP_PRESET
         prompt "H.264 bitrate/QP preset"
         default H264_QP_PRESET_DISABLED
