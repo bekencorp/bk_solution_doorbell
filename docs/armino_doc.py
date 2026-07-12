@@ -742,7 +742,8 @@ def main(argv):
 		return
  
 	if os.path.exists(os.path.join(root_path, args.target)):
-		build_doc(args.target, os.path.join(root_path, args.target), build_path, args.version)
+		target_build_path = os.path.join(build_path, args.target)
+		build_doc(args.target, os.path.join(root_path, args.target), target_build_path, args.version)
 	else:
 		print("Error not found target: %s" % os.path.join(root_path, args.target))
 

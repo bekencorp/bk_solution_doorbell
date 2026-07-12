@@ -62,11 +62,16 @@ Flash ``all-app.bin`` to BK7259v2.
 4. References
 -------------
 
-See Beken online documentation for BK7259 SMP / AP / CP details.
+For Armino SMP architecture, see `Armino SMP Architecture <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/en/v4.0.1/index.html>`_.
+
+For Application Processor (AP) configuration and usage, see `Armino AP <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/ap_doc/bk7259/en/v4.0.1/index.html>`_.
+
+For Communication Processor (CP) configuration and usage, see `Armino CP <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/cp_doc/bk7259/en/v4.0.1/index.html>`_.
 
 .. toctree::
     :hidden:
 
+    Armino SMP Architecture <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/en/v4.0.1/index.html>
     Example Projects <projects/index>
 
 * :ref:`genindex`

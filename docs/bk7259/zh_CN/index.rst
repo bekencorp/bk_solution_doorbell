@@ -63,11 +63,16 @@ Solution 模式推荐使用各工程目录下的 ``dbuild.sh``（自动注入 ``
 4. 参考文档
 -----------
 
-Armino SMP 架构、AP/CP 配置请参考 Beken 在线文档（BK7259）。
+Armino SMP 架构请参考 `Armino SMP 架构 <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/zh_CN/v4.0.1/index.html>`_。
+
+应用处理器 AP 配置和使用请参考 `Armino AP <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/ap_doc/bk7259/zh_CN/v4.0.1/index.html>`_。
+
+通信处理器 CP 配置和使用请参考 `Armino CP <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/cp_doc/bk7259/zh_CN/v4.0.1/index.html>`_。
 
 .. toctree::
     :hidden:
 
+    Armino SMP 架构 <https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/zh_CN/v4.0.1/index.html>
     示例工程 <projects/index>
 
 * :ref:`genindex`
