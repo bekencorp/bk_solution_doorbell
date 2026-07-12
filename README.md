@@ -1,48 +1,52 @@
-Doorbell Demo
--------------------
+# Doorbell Solution (BK7259)
 
-Overview
--------------------
+## Overview
 
-    This is a doorbell solution that supports real-time audio and video transmission, and real-time LCD display of UVC camera images.
+BK7259 SMP doorbell solution: video doorbell, low-power keepalive, headless IPC, and ISP/H264E tuning projects.
 
-Project Compilation
--------------------
+| Project | Description |
+| --- | --- |
+| `doorbell` | Video doorbell: MIPI/UVC, H.264 stream, MIPI LCD, BLE provisioning |
+| `doorbell_lp` | doorbell + AP power-down / CP TCP keepalive |
+| `ipc` | Headless IPC: SC3336 2304×1296 |
+| `isp_h264_tuning` | ISP / H264E PC-side tuning over Wi-Fi |
 
-- This project depends on: ``bk_avdk_smp_main``. You need to download the ``bk_avdk_smp_main`` code when compiling.
-- Compilation method: Compile under the doorbell solution directory: ``./projects/doorbell``. (Same for doorviewer solution)
-- Before compilation, you need to modify the Makefile file (./projects/doorbell/Makefile) to map the dependent source code to bk_avdk_smp_main, as shown below:
+Per-project details: `projects/<name>/README.md`.
 
-.. code-block:: makefile
+## Build
 
-    # Map dependent source code to bk_avdk_smp_main
-    SDK_DIR ?= $(abspath ../..)
+The solution depends on the AVDK SDK (`bk_avdk_smp`). Place the SDK as a sibling directory or set `SDK_DIR`.
 
-    # change to
-    SDK_DIR = /home/user.name/bk_avdk_smp_main
+```bash
+cd projects/doorbell
+./dbuild.sh make bk7259 PROJECT=doorbell
+```
 
-- Compilation command: ``make bk7258``
-- The above is the compilation command for BK7258. After compilation, a bin file will be generated at path: ``./projects/doorbell/build/bk7258/doorbell/package/all-app.bin``.
-- Flash this firmware to BK7258.
+Pin SDK path:
 
-Project Demonstration
-----------------------
+```bash
+SDK_DIR=/abs/path/to/bk_avdk_smp ./dbuild.sh make bk7259 PROJECT=doorbell
+```
 
-1. Download the IOT APK from Beken official website: <https://dl.bekencorp.com/apk/BekenIot.apk>
+Output: `projects/<name>/build/bk7259/<name>/package/all-app.bin`
 
-2. Create your own account and complete login
+## Demo
 
-3. Add device, select: `Video Doorbell`. DL devices range from 01-18, and DEBUG. For doorbell, it is recommended to first select `BK7258_DL_01` for trial use. After entering, it will detail the peripherals used. For doorviewer, it is recommended to select `BK7258_DL_18` for trial use
+1. Install <https://dl.bekencorp.com/apk/BekenIot.apk>
+2. Sign up / log in, add device → `Video Doorbell`
+3. Pick 2.4G Wi-Fi → BLE provisioning
+4. Camera + H.264 stream starts (doorbell default MIPI 1920×1080)
+5. Toggle LCD and audio from APK buttons
 
-4. `Start Adding`, select non-5G WiFi. After successful connection, click next to start network configuration via Bluetooth
+> Connect MIPI camera, MIPI LCD, speaker and mic before testing. Plug UVC camera into USB if used.
 
-5. Check the scanned device Bluetooth broadcasts, click on the one with matching IP address to connect. It will automatically complete 100% network configuration
+## Documentation
 
-6. After network configuration is complete, UVC camera will automatically open and network image transmission will start. For doorbell, the transmission format is H.264; for doorviewer, the transmission format is MJPEG. The image resolution is 864x480
+Sphinx docs under `docs/bk7259/`. Generate HTML:
 
-7. LCD screen and onboard audio are not displayed initially. You can choose to turn them on and off through buttons on the mobile APK
+```bash
+cd docs
+make doc
+```
 
-.. note::
-
-    Note that before using these peripherals, ensure the hardware environment is set up properly: UVC camera is plugged into the BK7258 USB interface, LCD display is connected, and audio-related Speaker and Mic are also connected. Otherwise, testing related functions may fail or cannot be demonstrated
-
+Output: `docs/build/doc/bk7259/`.
