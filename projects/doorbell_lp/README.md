@@ -1,344 +1,289 @@
-# Doorbell_lp Project Guide
+# Doorbell_lp Project (BK7259 SMP Low-Power Keepalive)
 
 * [中文](./README_CN.md)
 
-## 1 Project Overview
+## 1 Overview
 
-This project is a low-power keepalive solution for smart doorbell/lock devices based on the BK7259 chip. Doorbell_lp extends the doorbell project by adding an AP power-down low-power keepalive mechanism: when no multimedia services are active, the AP (application core) is fully powered down and only the CP (co-processor) runs the keepalive service to greatly reduce system power consumption.
+Low-power keepalive firmware in the doorbell solution, extending `doorbell` with AP power-down keepalive.
 
-.. note::
-   **Multimedia features**: The multimedia capabilities (camera, LCD, audio, etc.) are the same as in the doorbell project. See `Doorbell Project Guide <../doorbell/index.rst>`_ for details.
+**Core idea**: when no multimedia services are active (camera/audio/LCD all off), the AP is fully powered down and only the CP maintains a TCP long connection with periodic heartbeats. On server wake command, CP quickly powers up AP and restores doorbell business.
+
+Multimedia capabilities match `doorbell` — see [doorbell project documentation](../doorbell/index.html).
+
+CPU split (see section 2.2 for differences vs doorbell):
+
+- **CP** (M52): after `bk_init()`, runs `db_ipc_msg_init()` and `pl_wakeup_host()` to power up AP; in keepalive mode runs keepalive / db_pack / powerctrl (does **not** call `bk_start_ap_system()`).
+- **AP** (M55): same as doorbell during normal operation; powered down by CP in keepalive mode, reboots on wake.
 
 ## 2 Features
 
 ### 2.1 Low-power keepalive
 
-* **AP power-down keepalive**: In keepalive mode the AP (application core) is fully powered down; only the CP (co-processor) runs, achieving very low power consumption.
-* **Low-voltage deep sleep**: After AP power-down the system enters low-voltage sleep (CP sets WiFi DTIM=10), minimizing power draw.
-* **RTC wakeups**: The RTC timer provides periodic wakeups (default 30s).
-* **TCP long-connection keepalive**: CP maintains a TCP connection to the server and sends heartbeats.
-* **Fast wake recovery**: On receiving a wake command CP quickly powers up AP and restarts multimedia services.
-* **CIF filter**: Configure CIF filters to allow server packets to wake the system even when AP is powered down.
+| Feature | Description |
+| --- | --- |
+| AP power-down keepalive | AP fully off in keepalive mode; only CP runs |
+| Low-voltage deep sleep | CP sets Wi-Fi DTIM=10 |
+| RTC periodic wake | default 30 s heartbeat interval |
+| TCP long connection | CP maintains TCP with db_pack framing |
+| Fast wake | `DBCMD_WAKE_UP_REQUEST` → CP powers up AP |
+| CIF filter | server packets can wake system while AP is off |
+| CP port binding | socket bound to 0x1000–0x1010 so peer replies reach CP stack |
+| Disconnect recovery | 3 missed heartbeats → link dead → wake AP |
 
-### 2.2 Multimedia features
+### 2.2 vs doorbell
 
-Multimedia features (video streaming, camera management, LCD display, audio) are identical to the doorbell project. See the doorbell guide for details.
+| Item | doorbell | doorbell_lp |
+| --- | --- | --- |
+| Low-power keepalive | none | AP off + CP TCP heartbeat |
+| ap_main extras | — | `doorbell_ipc_wakeup_env_init()`, `doorbell_keepalive_handle_wakeup_reason()`, `doorbell_keepalive_cli_init()` |
+| ASR auto-start | yes | no (defconfig enabled, call manually) |
+| CP boots AP via | `bk_start_ap_system()` | `pl_wakeup_host(POWERUP_POWER_WAKEUP_FLAG)` |
+| CP modules | Wi-Fi/BLE Controller + boot AP | keepalive / db_ipc_msg / db_pack / powerctrl + AP power control |
+| defconfig | standard doorbell | + `CONFIG_NTWK_CLIENT_SERVICE_ENABLE`; CP enables `CONFIG_PM_AP_POWERDOWN_WHEN_LV` etc. |
 
 ## 3 Quick Start
 
-### 3.1 Hardware preparation
+### 3.1 Hardware
 
-* BK7259 development board
-* LCD panel
-* UVC/DVP camera module
-* On-board speaker/microphone or UAC
-* Power supply and cables
+Same as doorbell: BK7259 board, MIPI LCD, MIPI/UVC camera, speaker/mic.
 
-### 3.2 Build and flash
+### 3.2 Build
 
-Build steps: see `Doorbell solution <../../index.rst>`_  
-Flash steps: see BK7259 flashing guide (linked in project docs)  
-Example generated firmware path: ``projects/doorbell_lp/build/bk7259/doorbell_lp/package/all-app.bin``
-
-### 3.3 Basic operation
-
-The basic operation is the same as the doorbell project. See the doorbell guide for full steps. In short:
-
-1. Power on the device.
-2. Use the IOT app to add the device.
-3. Configure WiFi (2.4GHz only) and complete provisioning.
-4. When no multimedia services are active, the system may enter low-power keepalive (AP power-down). CP maintains keepalive and will wake AP on server command.
-
-.. note::
-   **Low-power keepalive**: After normal multimedia operation, when no active multimedia services exist, the system may automatically enter low-power keepalive (AP power-down). See section "4 Low-power keepalive implementation" for details.
-
-## 4 Low-power keepalive implementation
-
-### 4.1 Overall architecture
-
-Doorbell_lp uses a dual-core architecture to implement low-power keepalive:
-
-![Doorbell LP architecture](../../docs/bk7259/_static/doorbell_lp_en.png)
-
-### 4.2 Workflows
-
-#### 4.2.1 Keepalive start workflow
-
-```
-AP periodically checks multimedia service status (30s)
-    ↓
-Stop current network services (TCP/UDP)
-    ↓
-Read server info from Flash
-    ↓
-Send IPC keepalive start command to CP
-    ↓
-CP initializes keepalive module
-    ↓
-CP powers down AP (pl_power_down_host)  ← core: AP fully powered down
-    ↓
-CP configures CIF filter
-    ↓
-CP establishes TCP connection (retry up to 5 times)
-    ↓
-CP creates RX thread to receive server data
-    ↓
-CP starts low-voltage sleep
-    ↓
-Send first heartbeat
-    ↓
-Enter keepalive loop (RTC 30s wake → send heartbeat)
-    ↓
-AP is powered down; only CP runs — very low power
+```bash
+cd projects/doorbell_lp
+SDK_DIR=/abs/path/to/avdk_sdk ./dbuild.sh make bk7259 PROJECT=doorbell_lp
 ```
 
-#### 4.2.2 Wake workflow
+Output: `projects/doorbell_lp/build/bk7259/doorbell_lp/package/all-app.bin`
+
+### 3.3 Demo
+
+1. Normal BekenIot APK provisioning and streaming (same as doorbell)
+2. Turn off all multimedia in APK (camera, audio, LCD)
+3. Wait ~10 s (default idle check interval) → system enters keepalive
+4. AP powered down, CP sends TCP heartbeats, power drops significantly
+5. Server wake command → device resumes streaming/audio
+
+### 3.4 Keepalive CLI
+
+```text
+ka                          # show help
+ka interval <ms>            # idle check interval (3000–300000 ms, persisted to Flash)
+```
+
+## 4 Keepalive Implementation
+
+### 4.1 Architecture
 
 ```
-Server sends wake-up command
-    ↓
-CP RX thread receives and unpacks (AP is powered down)
-    ↓
-CP wakes AP (power up)
-    ↓
-AP re-initializes and starts
-    ↓
-AP reads wake reason
-    ↓
-AP stops CP keepalive and starts multimedia services
-    ↓
-System returns to normal (AP running, CP coordinating)
+┌─────────────────────────────────────────────────────────────┐
+│  AP (M55) — normal operation                              │
+│  doorbell_core / multimedia / BLE / streaming             │
+│  doorbell_keepalive.c: monitor MM status, trigger keepalive │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ IPC (doorbell_ipc_msg)
+┌──────────────────────▼──────────────────────────────────────┐
+│  CP (M52) — keepalive mode                                 │
+│  db_keepalive.c: power down AP → TCP → RTC heartbeat → RX wake│
+│  db_pack.c: framing (magic/CRC/sequence)                      │
+│  powerctrl.c: AP power on/off                                 │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### 4.3 AP-side implementation
+### 4.2 Keepalive start flow
 
-#### 4.3.1 Multimedia status monitoring
+```
+AP periodically checks doorbell_mm_service_get_status() (default 10 s)
+    ↓
+mm_status == 0 (no active camera / audio / lcd)
+    ↓
+doorbell_keepalive_stop_service_if_running() stops TCP/UDP streaming
+    ↓
+read server IP/port from Flash (doorbell_get_ntwk_service_info_from_flash)
+    ↓
+doorbell_ipc_start_keepalive(ip, port) → CP
+    ↓
+CP db_keepalive_cp_init() + db_keepalive_cp_start()
+    ↓
+TX thread: pl_power_down_host() powers down AP
+    ↓
+CIF filter + CP port bind + TCP connect (retry up to 5 times)
+    ↓
+create RX thread + enter low-voltage sleep (PM_MODE_LOW_VOLTAGE)
+    ↓
+send first heartbeat (DBCMD_KEEP_ALIVE_REQUEST), enter 30 s RTC loop
+```
 
-AP checks multimedia status via `doorbell_mm_service_get_status()` every 30s:
+**Note**: if CS2 P2P mode is active, switch to TCP/UDP first — keepalive is TCP-only.
 
-- If no active multimedia service and last update exceeds threshold, trigger keepalive startup.
-- If multimedia services are active, continue normal operation.
+### 4.3 Wake-up flow
 
-#### 4.3.2 Keepalive start trigger
+```
+Server → DBCMD_WAKE_UP_REQUEST
+    ↓
+CP RX thread db_pack_unpack()
+    ↓
+pl_wakeup_host(POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG)
+    ↓
+AP reboots
+    ↓
+doorbell_keepalive_handle_wakeup_reason()
+    ├── disable BLE
+    ├── doorbell_ipc_stop_keepalive() stops CP keepalive
+    └── restore TCP/UDP service from Flash
+    ↓
+send pending wake response
+    ↓
+resume normal doorbell business
+```
 
-1. Stop current network service: `db_keepalive_stop_service_if_running()`.
-2. Read server IP/port from flash and send IPC `db_ipc_start_keepalive()` to CP.
-3. If current service is CS2, switch to TCP/UDP first (keepalive supports TCP only).
+### 4.4 Wake flags
 
-#### 4.3.3 Wake handling
+Defined in `doorbell_keepalive.h`:
 
-On wake, AP reads `pl_wakeup_env->wakeup_reason`. If `POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG`:
+| Flag | Value | Meaning |
+| --- | --- | --- |
+| `POWERUP_POWER_WAKEUP_FLAG` | 1 | normal power-on |
+| `POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG` | 2 | server multimedia wake request |
+| `POWERUP_KEEPALIVE_DISCONNECTION` | 3 | keepalive disconnect wake |
+| `POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG` | 4 | keepalive failure wake |
 
-- Disable BLE.
-- Stop CP keepalive.
-- Start saved service from flash (TCP/UDP).
-- Send pending wake commands after service start.
+### 4.5 AP-side details
 
-### 4.4 CP-side implementation
+**Multimedia status bits** (`doorbell_mm_service_get_status()`):
 
-#### 4.4.1 Keepalive initialization
+- `MM_STATUS_CAMERA_MASK`: camera / H.264 stream
+- `MM_STATUS_AUDIO_MASK`: full-duplex audio
+- `MM_STATUS_LCD_MASK`: LCD display
 
-1. Initialize keepalive module: allocate buffers, init db_pack protocol, init semaphores for RTC.
-2. Create TX thread `db_keepalive_tx_handler()` for connection, heartbeat and sleep management.
+All three zero → idle → keepalive countdown starts.
 
-#### 4.4.2 TX thread main flow
+**Trigger logic** (`doorbell_keepalive.c`):
 
-1. Power down AP: `pl_power_down_host()`.
-2. Configure CIF filter: `cif_filter_add_customer_filter(server, port)`.
-3. Create TCP socket, set timeout (3s), connect to server (retry up to 5 times).
-4. Create RX thread `db_keepalive_rx_handler()` to receive and unpack server data.
-5. Start low-voltage sleep: `db_keepalive_start_lv_sleep()` → `PM_MODE_LOW_VOLTAGE`.
-6. Enter keepalive loop: set RTC timer (30s), wait on semaphore, send heartbeat, repeat.
+1. Timer fires → check mm_status
+2. If idle → try to stop current network service
+3. After service stops (or no stop needed) → send IPC keepalive start
+4. If service still running (active session) → skip, wait for next check
 
-#### 4.4.3 RTC wake mechanism
+### 4.6 CP-side details
 
-- CP uses RTC (AON_RTC_ID_1) for wakeups.
-- Initial delay uses a software timer; then switch to RTC wakeups (default 30s).
-- On RTC interrupt `db_keepalive_rtc_timer_handler()` posts semaphore to wake TX thread.
+**TX thread** (`db_keepalive_tx_handler`):
 
-#### 4.4.4 Heartbeat mechanism
+1. `pl_power_down_host()` — AP fully off
+2. `cif_filter_add_customer_filter(server, port)` — CIF filter
+3. `bind()` to CP port range (0x1000–0x1010)
+4. TCP `connect()` to server (3 s timeout, up to 5 retries, 1 s apart)
+5. create RX thread
+6. `db_keepalive_start_lv_sleep()` — low-voltage sleep
+7. loop: set RTC 30 s → wait semaphore → send heartbeat → repeat
 
-1. Construct keepalive request `DBCMD_KEEP_ALIVE_REQUEST` (db_evt_head_t).
-2. Pack data with `db_pack_pack()` (magic, seq, length, CRC).
-3. Send via `send()` and check results.
-4. RX thread processes responses; `DBCMD_KEEP_ALIVE_RESPONSE` indicates success.
+**RX thread** (`db_keepalive_rx_handler`):
 
-#### 4.4.5 Wake command handling
+- block receive → `db_pack_unpack()`
+- `DBCMD_KEEP_ALIVE_RESPONSE`: heartbeat OK
+- `DBCMD_WAKE_UP_REQUEST`: call `pl_wakeup_host()` to wake AP
 
-1. RX thread receives raw data via `db_keepalive_recv_raw_data()` and unpacks via `db_pack_unpack()`.
-2. If opcode == `DBCMD_WAKE_UP_REQUEST`, CP calls `pl_wakeup_host(POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG)` to power up AP via CIF and set wake reason.
-3. AP restarts, reads wake reason, stops CP keepalive and resumes multimedia services.
+**Framing** (`cp/db_pack/`): magic validation, sequence increment, CRC, fragment support.
 
-#### 4.4.6 Binding keepalive port to CP port range
+**CP port binding**: LwIP ephemeral ports (0xc000–0xffff) fall outside CP local range (0x1000–0x1010). CP receive path routes by destination port. Keepalive socket explicitly binds to CP range so peer replies reach CP stack.
 
-This mechanism provides a way to have keepalive-related packets from the peer delivered directly to the **CP-side protocol stack**. When establishing the keepalive TCP connection, the CP side can **bind** the socket to the **CP port range** before calling `connect()`.
+### 4.7 Configuration
 
-**Notes:**
-
-- The CP receive path uses the **destination port** to decide whether uplink data goes to CP or AP: packets whose destination port falls in the **CP local port range** (e.g. `LOCAL_PORT_RANGE_START`–`LOCAL_PORT_RANGE_END`, 0x1000–0x1010) are forwarded to the CP protocol stack.
-- LwIP’s default ephemeral port range is 0xc000–0xffff, which is outside that CP port range, so peer replies may be delivered to the AP-side stack and the CP connection may not close properly.
-- Binding the keepalive socket to a port in the CP port range ensures the connection’s local port is in that range, so peer replies have a destination port in the same range and are delivered to the CP stack, allowing normal connect, receive, and close on the CP side.
-
-### 4.5 Key technical points
-
-#### 4.5.1 Low-voltage sleep (AP power-down)
-
-- Enter condition: no multimedia services running and keepalive connection established.
-- AP power-down: `pl_power_down_host()` fully cuts AP power.
-- Wake sources: RTC interrupt or CIF-filtered server packets.
-- Power: system enters deep sleep; CP sets WiFi DTIM to 10; AP off yields very low power draw.
-
-#### 4.5.2 CIF filter
-
-- CIF filter allows server packets to wake the system while AP is powered down.
-- Configure via `cif_filter_add_customer_filter()`.
-
-#### 4.5.3 Data packing protocol
-
-- Uses `db_pack` protocol: magic, sequence, length, CRC; supports segmentation and concatenation.
-
-#### 4.5.4 Connection retry
-
-- Retries up to 5 times with 1s interval on TCP connect failure.
-
-### 4.6 Configuration parameters
-
-- Keepalive interval: 30s (`DB_KEEPALIVE_DEFAULT_INTERVAL_MS = 30 * 1000`)
-- Socket timeout: 3s (`DB_KEEPALIVE_SOCKET_TIMEOUT_MS = 3000`)
-- Max retry count: 5 (`DB_KEEPALIVE_MAX_RETRY_CNT = 5`)
-- Message buffer size: 1460 bytes (`DB_KEEPALIVE_MSG_BUFFER_SIZE = 1460`)
-- RTC timer minimum: 500 ms (`DB_KEEPALIVE_RTC_TIMER_THRESHOLD_MS = 500`)
-- Multimedia check interval: 30s (`MM_STATUS_CHECK_INTERVAL_MS = 30 * 1000`)
+| Parameter | Default | Macro | Notes |
+| --- | --- | --- | --- |
+| Heartbeat interval | 30 s | `DB_KEEPALIVE_DEFAULT_INTERVAL_MS` | CP RTC wake period |
+| Socket timeout | 3 s | `DB_KEEPALIVE_SOCKET_TIMEOUT_MS` | TCP connect/recv timeout |
+| Max connect retry | 5 | `DB_KEEPALIVE_MAX_RETRY_CNT` | TCP connect failure |
+| Max no-response | 3 | `DB_KEEPALIVE_MAX_NO_RESP_CNT` | consecutive missed heartbeats |
+| Message buffer | 1460 B | `DB_KEEPALIVE_MSG_BUFFER_SIZE` | max single packet |
+| RTC min interval | 500 ms | `DB_KEEPALIVE_RTC_TIMER_THRESHOLD_MS` | |
+| Idle check interval | 10 s | `MM_STATUS_CHECK_INTERVAL_MS` | AP side, CLI configurable |
+| Idle check minimum | 3 s | `MM_STATUS_CHECK_MIN_INTERVAL_MS` | CLI lower bound |
+| CP bind ports | 0x1000–0x1010 | `DB_KEEPALIVE_CP_BIND_PORT_START/END` | 17 ports |
 
 ## 5 API Reference
 
-### 5.1 AP-side Keepalive API
+### 5.1 AP side (`components/smart_lock/`)
 
-#### 5.1.1 db_keepalive_handle_wakeup_reason
+**Keepalive management** (`doorbell_keepalive.h`):
 
 ```c
-/**
- * @brief Handle system wakeup reasons
- *
- * @note This function is called when the system wakes up and handles different wakeup reasons:
- *       1. Read wakeup reason (pl_get_wakeup_reason())
- *       2. If it is a multimedia wake request (POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG):
- *          - Disable Bluetooth
- *          - Stop CP-side keepalive
- *          - Start service from Flash
- *          - Send any pending wake commands
- *
- * @see pl_get_wakeup_reason()
- */
-void db_keepalive_handle_wakeup_reason(void);
+void doorbell_keepalive_handle_wakeup_reason(void);
+void doorbell_keepalive_on_service_start_success(void);
+void doorbell_keepalive_on_keepalive_disconnection(void);
+bk_err_t doorbell_keepalive_start_mm_status_check(void);
+bk_err_t doorbell_keepalive_stop_mm_status_check(void);
+int doorbell_keepalive_cli_init(void);
 ```
 
-### 5.2 CP-side Keepalive API
-
-#### 5.2.1 db_keepalive_cp_init
+**IPC** (`doorbell_ipc_msg.h`):
 
 ```c
-/**
- * @brief Initialize CP-side keepalive module
- *
- * @param cfg Pointer to keepalive configuration structure
- *        - server: server IP address
- *        - port: server port
- *
- * @return bk_err_t Operation result
- *         - BK_OK: Success
- *         - BK_FAIL: Failure
- *
- * @note This function initializes the keepalive module:
- *       1. Allocate receive buffers
- *       2. Initialize the data packing protocol (db_pack_init)
- *       3. Initialize semaphores (used for RTC wakeups)
- *       4. Set keepalive interval (default 30s)
- *
- * @warning Ensure configuration parameters are valid before calling
- * @see db_keepalive_cp_start()
- */
+bk_err_t doorbell_ipc_start_keepalive(const char *ip_addr, const char *cmd_port);
+bk_err_t doorbell_ipc_stop_keepalive(void);
+int doorbell_ipc_wakeup_env_init(void);
+```
+
+IPC commands:
+
+| Command | Value | Direction |
+| --- | --- | --- |
+| `DOORBELL_IPC_CMD_KEEPALIVESTART` | 0x0002 | AP → CP |
+| `DOORBELL_IPC_CMD_KEEPALIVESTOP` | 0x0003 | AP → CP |
+| `DOORBELL_IPC_EVENT_KEEPALIVE_DISCONNECTION` | 0x1002 | CP → AP |
+
+### 5.2 CP side (`cp/keepalive/db_keepalive.h`)
+
+```c
 bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg);
-```
-
-#### 5.2.2 db_keepalive_cp_start
-
-```c
-/**
- * @brief Start CP-side keepalive service
- *
- * @return bk_err_t Operation result
- *         - BK_OK: Success
- *         - BK_FAIL: Failure
- *
- * @note This function starts the keepalive service:
- *       1. Create TX thread (db_keepalive_tx_handler)
- *       2. The TX thread is responsible for:
- *          - Powering down AP
- *          - Establishing TCP connection
- *          - Creating RX thread
- *          - Entering low-voltage sleep
- *          - Sending heartbeat packets
- *
- * @warning Call db_keepalive_cp_init() before this function
- * @see db_keepalive_cp_init()
- * @see db_keepalive_cp_stop()
- */
+bk_err_t db_keepalive_cp_deinit(void);
 bk_err_t db_keepalive_cp_start(void);
-```
-
-#### 5.2.3 db_keepalive_cp_stop
-
-```c
-/**
- * @brief Stop CP-side keepalive service
- *
- * @return bk_err_t Operation result
- *         - BK_OK: Success
- *         - BK_FAIL: Failure
- *
- * @note This function stops the keepalive service and cleans up resources:
- *       1. Stop RTC timer
- *       2. Exit low-voltage sleep
- *       3. Close TCP connection
- *       4. Delete TX and RX threads
- *       5. Release all resources
- *
- * @see db_keepalive_cp_start()
- */
 bk_err_t db_keepalive_cp_stop(void);
 ```
 
-### 5.3 Power Management API
-
-#### 5.3.1 pl_wakeup_host
+### 5.3 Power control (`cp/powerctrl/powerctrl.h`)
 
 ```c
-/**
- * @brief Wake AP (application core)
- *
- * @param flag Wakeup reason flag
- *        - POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG: multimedia wake request
- *        - POWERUP_KEEPALIVE_WAKEUP_FLAG: keepalive wake
- *
- * @note This function wakes the AP and sets the wake reason:
- *       1. Set the wake reason (pl_set_wakeup_reason)
- *       2. Turn on AP power (bk_pm_module_vote_boot_ap_ctrl)
- *       3. Wake AP via CIF (cif_power_up_host)
- */
 void pl_wakeup_host(uint32_t flag);
-```
-
-#### 5.3.2 pl_power_down_host
-
-```c
-/**
- * @brief Power down AP (application core)
- *
- * @note This function powers down the AP:
- *       1. Reset wakeup reason (pl_reset_wakeup_reason)
- *       2. Turn off AP power (bk_pm_module_vote_boot_ap_ctrl)
- *       3. Power down AP via CIF (cif_power_down_host)
- */
 void pl_power_down_host(void);
 ```
+
+## 6 Layout
+
+```
+projects/doorbell_lp
+├── ap/
+│   ├── ap_main.c                 # doorbell config + keepalive init
+│   ├── audio_param/
+│   └── config/bk7259_ap/defconfig
+├── cp/
+│   ├── cp_main.c
+│   ├── keepalive/                # CP keepalive (TX/RX, RTC, heartbeat)
+│   │   ├── db_keepalive.c
+│   │   └── db_keepalive.h
+│   ├── db_ipc_msg/               # AP↔CP IPC routing
+│   ├── db_pack/                  # framing protocol
+│   └── powerctrl/                # pl_wakeup_host / pl_power_down_host
+├── partitions/bk7259/
+├── CMakeLists.txt
+├── Makefile
+└── dbuild.sh
+```
+
+## 7 FAQ
+
+**Q: How to confirm AP is powered down?**
+
+A: No AP-side UART logs (CP logs only). Compare power consumption before/after keepalive.
+
+**Q: Can BLE provision while in keepalive?**
+
+A: No. BLE runs on AP. After wake, AP reboots — re-provision or restore Wi-Fi config from Flash.
+
+**Q: Idle check interval vs heartbeat interval?**
+
+A: Idle check (default 10 s, AP) decides when to enter keepalive; heartbeat (30 s, CP) maintains TCP. Both are independently configurable via code/CLI.
+
+**Q: Keepalive with CS2 P2P?**
+
+A: Not supported. Auto-switches to TCP/UDP before keepalive. Use TCP service mode in production.

@@ -1,95 +1,174 @@
-# Doorbell Project (BK7259 SMP Solution)
+# IPC Project (BK7259 SMP Solution)
 
 * [中文](./README_CN.md)
 
 ## 1 Overview
 
-This project is the BK7259 SMP port of `bk_avdk_smp_dev_7259v2_bringup_25W4801/projects/multimedia/doorbell`.
-It keeps the full doorbell capability set: UVC/MIPI camera capture, H.264 encoding, real-time Wi-Fi A/V
-transmission, BLE provisioning, full-duplex audio and ASR keyword wake-up.
+This project is the **IPC network camera firmware** in the doorbell solution, based on BK7259 SMP.
+It reuses the `smart_lock` doorbell stack (BLE provisioning, TCP/UDP streaming, full-duplex audio, ASR),
+but **does not bring up the LCD/GPU display pipeline by default** — targeting headless IPC / network camera products.
 
-CPU split:
+### 1.1 CPU split
 
-- **CP**: only `bk_init` + `bk_start_ap_system()` to bring up the AP.
-- **AP**: runs all business logic (`media_service`, `devices_mgmt`, `smart_lock` doorbell core/boarding/network, ASR, etc.).
+| Core | Role |
+| --- | --- |
+| CP (M52) | bk_init() and bk_start_ap_system() (same as doorbell) |
+| AP (M55) | media_service, devices_mgmt, doorbell business, ASR, AT commands |
 
-## 2 Highlights
+### 1.2 vs doorbell
+
+| Item | doorbell | ipc (this project) |
+| --- | --- | --- |
+| Use case | video doorbell with LCD | headless IPC camera |
+| Default sensor | GC2053 1920×1080@25fps | SC3336 2304×1296@20fps |
+| LCD / GPU / DPU | enabled in ap_main | not configured in ap_main (LCD/GPU drivers remain in defconfig) |
+| AT commands | port 5 | port 5, WiFi/MISC AT |
+| ASR | auto-start | auto-start |
+| UVC | defconfig enabled | defconfig enabled (ap_main configures MIPI only) |
+| CS2 P2P | enabled | not enabled (CS2 buffer config retained) |
+
+## 2 Features
 
 | Module | Description |
 | --- | --- |
-| Camera | UVC + MIPI ISP (default 1920x1080@25fps, NV12) |
-| Display | MIPI DSI (default `lcd_device_hx8399c_mipi_1080x1920`), DPU video channel ARGB8888 |
-| GPU | VG-Lite Flexa rotate / format convert / compression |
-| Codec | H.264 hardware encoder (doorbell), SW/HW JPEG decoder |
-| Network | LAN UDP/TCP, CS2 P2P, real-time Wi-Fi streaming |
-| Bluetooth | BLE Boarding provisioning, BLE Slave-only |
+| Camera | MIPI CSI (default SC3336, 2304×1296@20fps, NV12, Flexa) |
+| Codec | H.264 HW encoder, JPEG decoder |
+| Network | LAN UDP/TCP streaming (doorbell stack) |
+| Bluetooth | BLE Boarding provisioning |
 | Audio | ADK + AEC v3 + G.711/G.722, on-board Mic/Speaker, UVC UAC |
-| ASR | KWS + TFLite-Micro + NPU |
+| ASR | KWS + TFLite-Micro + NPU (SRAM mode, `CONFIG_ASR_SERVICE_USE_SRAM`) |
+| AT | port 5, `CONFIG_WIFI_AT_ENABLE` / `CONFIG_MISC_AT_ENABLE` |
 
-See `ap/config/bk7259_ap/defconfig` for the full configuration.
+### 2.1 Default board config
+
+Pin definitions in `ap/ap_main.c` (same MIPI pins as doorbell):
+
+| Signal | GPIO | Notes |
+| --- | --- | --- |
+| MIPI I2C SCL | GPIO_69 | bus id = 1 |
+| MIPI I2C SDA | GPIO_70 | |
+| MIPI Sensor Reset | GPIO_71 | |
+| MIPI Sensor XCLK | GPIO_59 | |
+
+**Camera (MIPI CSI)**
+
+- Sensor: SC3336 (`CONFIG_CSI_SC3336`)
+- Max resolution: 2304×1296@20fps
+- ISP main channel: 2304×1296, NV12, Flexa enabled
+- No display / gpu board init
+
+### 2.2 Video pipeline
+
+```
+SC3336 (MIPI CSI, 2304×1296 NV12 Flexa)
+    │
+    └──► H.264 Encoder (Flexa bond) ──► Wi-Fi stream
+```
+
+No LCD branch. H.264 encode/stream follows ISP MP board config (2304×1296).
+
+### 2.3 Network
+
+Same ports as doorbell: CTRL 7100 / VIDEO 7150 TCP, 7180 UDP / AUDIO 7140 TCP, 7170 UDP.
+Demo uses BekenIot APK: after provisioning, H.264 stream starts automatically (2304×1296).
+
+### 2.4 AT commands
+
+AT subsystem enabled in defconfig, default port 5 (`CONFIG_DEFAULT_AT_PORT=5`).
+Used for production test automation (Wi-Fi connect, device info query, etc.).
 
 ## 3 Build
 
-The project depends on the AVDK source tree `bk_avdk_smp_dev_7259v2_bringup_25W4801`. The SDK must sit
-next to this solution (sibling directory) or be specified via the `SDK_DIR` environment variable. The
-recommended entry point is the solution `dbuild.sh` wrapper, which sets `BK_SOLUTION_MODE=1`,
-`SOLUTION_DIR` and `PROJECT_DIR` automatically:
+### 3.1 Dependency
+
+AVDK SDK (`avdk_sdk`), specified via `SDK_DIR`.
+
+### 3.2 Build command
 
 ```bash
-cd projects/doorbell
-./dbuild.sh make bk7259 PROJECT=doorbell
+cd projects/ipc
+SDK_DIR=/abs/path/to/avdk_sdk ./dbuild.sh make bk7259 PROJECT=ipc
 ```
 
-To pin the SDK path:
+Local build:
 
 ```bash
-SDK_DIR=/abs/path/to/bk_avdk_smp_dev_7259v2_bringup_25W4801 ./dbuild.sh make bk7259 PROJECT=doorbell
+make bk7259 SDK_DIR=/abs/path/to/avdk_sdk PROJECT=ipc
 ```
 
-Build output:
+### 3.3 Output
 
 ```
-projects/doorbell/build/bk7259/doorbell/package/all-app.bin
+projects/ipc/build/bk7259/ipc/package/all-app.bin
 ```
 
-Flash this single bin into BK7259v2.
+## 4 Flash and Demo
 
-## 4 Demo
+### 4.1 Hardware
 
-1. Install the IOT APK: <https://dl.bekencorp.com/apk/BekenIot.apk>.
-2. Sign up / log in.
-3. Add device -> select `Video Doorbell`.
-4. Pick a non-5G Wi-Fi, then proceed to BLE provisioning.
-5. From the scanned BLE list, tap the entry whose IP matches the device. Provisioning auto-completes.
-6. After provisioning, the camera + H.264 streaming starts automatically (864x480).
-7. The on-board LCD and audio are toggled from the APK buttons.
+- BK7259 development board
+- MIPI CSI camera (default SC3336, 2304×1296)
+- On-board speaker / mic
+- No LCD required
 
-> Make sure the UVC camera, MIPI LCD, speaker and microphone are connected before testing.
+### 4.2 Demo flow
+
+Same as doorbell, using BekenIot APK:
+
+1. Install APK → sign up / log in → add `Video Doorbell` device
+2. BLE provisioning (2.4G Wi-Fi)
+3. H.264 stream starts automatically after provisioning
+4. Toggle audio from APK (no LCD button)
+
+### 4.3 Use cases
+
+- Indoor/outdoor IPC camera (no local display)
+- Batch production test with AT commands
+- High-resolution sensor (2304×1296) streaming validation
+- Keyword wake-up (ASR) + remote talk
 
 ## 5 Layout
 
 ```
-projects/doorbell
-├── ap/                       # AP business (doorbell + media + ASR)
-│   ├── ap_main.c
-│   ├── CMakeLists.txt
+projects/ipc
+├── ap/
+│   ├── ap_main.c                 # camera board config only
+│   ├── audio_param/audio_para.c
 │   └── config/bk7259_ap/defconfig
-├── cp/                       # CP boot (only kicks the AP)
+├── cp/
 │   ├── cp_main.c
-│   ├── CMakeLists.txt
 │   └── config/bk7259/defconfig
-├── partitions/bk7259/        # Flash partitions & RAM regions
-│   ├── auto_partitions.csv
-│   └── ram_regions.csv
-├── CMakeLists.txt            # top-level; injects ../../components into EXTRA_COMPONENTS_DIRS
+├── partitions/bk7259/
+├── CMakeLists.txt
 ├── Makefile
-├── dbuild.sh / dbuild.ps1    # docker build wrapper (solution mode)
-└── .ci                       # CI compile command
+├── dbuild.sh / dbuild.ps1
+└── .ci
 ```
 
-Solution-side common components used by this project live in
-`bk_solution_doorbell_dev_7259v2_bringup_25W4801/components/`:
+### 5.1 Key defconfig differences vs doorbell
 
-- `multimedia_device_service`: camera/display/gpu/codec/uvc device management.
-- `smart_lock`: doorbell_core, ble_boarding, network_transfer, audio_device, cmd, etc.
-- `lcd_device`: solution-local ST7701SN RGB panel driver (opt-in).
+| Config | ipc | doorbell |
+| --- | --- | --- |
+| `CONFIG_CSI_SC3336` | y | n |
+| `CONFIG_CSI_GC2053` | n | y |
+| `CONFIG_APP_GPU` | n | y |
+| `CONFIG_CS2_P2P_SERVER` | n | y |
+| `CONFIG_ASR_SERVICE_USE_SRAM` | y | n |
+| `CONFIG_AT` / `CONFIG_WIFI_AT_ENABLE` | y | y |
+| `CONFIG_MDS_SNAPSHOT` | n | y |
+
+Shared components: `../../components/`.
+
+## 6 FAQ
+
+**Q: Can I add an LCD?**
+
+A: defconfig retains LCD driver options, but `ap_main.c` has no display/gpu config. Use the `doorbell` project or add display init in ap_main.
+
+**Q: How to change sensor?**
+
+A: Edit resolution/pin params in `ap/ap_main.c` and switch `CONFIG_CSI_*` in defconfig.
+
+**Q: What is the stream resolution?**
+
+A: Same as capture: 2304×1296. `app_h264e_turn_on()` reads ISP MP channel size; APK `DBCMD_SET_CAMERA_TURN_ON` width/height are not applied on the MIPI path.
