@@ -705,10 +705,10 @@ avdk_err_t app_isp_camera_sp_snapshot_channel_ensure(uint16_t width, uint16_t he
     }
 
 #ifdef CONFIG_MDS_SNAPSHOT
-    ret = bk_snapshot_sw_sp_channel_open_at_mp_mid_frame(isp_cam_handle.camera_ctlr_handle, width, height);
+    ret = bk_snapshot_sw_sp_channel_open_at_mp_frame_complete(isp_cam_handle.camera_ctlr_handle, width, height);
     if (ret != AVDK_ERR_OK)
     {
-        LOGE("%s, open SP %ux%u at MP mid-frame interrupt failed ret=%d\n", __func__, width, height, ret);
+        LOGE("%s, open SP %ux%u at MP frame-complete interrupt failed ret=%d\n", __func__, width, height, ret);
         return ret;
     }
 #else

@@ -41,9 +41,9 @@ avdk_err_t bk_snapshot_sw_capture(bk_snapshot_sw_config_t *config,
 
 avdk_err_t bk_snapshot_sw_prepare(void);
 
-avdk_err_t bk_snapshot_sw_sp_channel_open_at_mp_mid_frame(bk_isp_camera_ctlr_handle_t camera,
-							uint16_t width,
-							uint16_t height);
+avdk_err_t bk_snapshot_sw_sp_channel_open_at_mp_frame_complete(bk_isp_camera_ctlr_handle_t camera,
+							      uint16_t width,
+							      uint16_t height);
 
 avdk_err_t bk_snapshot_sw_deinit(void);
 

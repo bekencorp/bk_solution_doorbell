@@ -79,6 +79,7 @@ static void bk_snapshot_outbuf_pool_free(void)
 	s_snapshot.jpege_outbuf_pool = NULL;
 }
 
+
 static avdk_err_t bk_snapshot_outbuf_pool_alloc(void)
 {
 	bk_snapshot_outbuf_pool_free();
@@ -173,6 +174,7 @@ static uint32_t bk_snapshot_outbuf_complete(bk_jpeg_encode_outbuf_info_t *info)
 				bk_frame_buffer_free(info->outbuf);
 			}
 		}
+
 		return BK_OK;
 	}
 
