@@ -451,12 +451,9 @@ int doorbell_audio_turn_off(void)
     #endif
     const char *service_name = ntwk_trans_get_service_name();
 
-    if (service_name == NULL)
-    {
-        LOGE("%s, service_name is NULL\n", __func__);
-        return BK_FAIL;
-    }
-    if (strcmp(service_name, "cs2_service") == 0)
+    /* NULL service_name just means the network layer is already released;
+     * don't abort local audio teardown, or the voice loop leaks. */
+    if (service_name != NULL && strcmp(service_name, "cs2_service") == 0)
     {
         ntwk_trans_chan_stop(NTWK_TRANS_CHAN_AUDIO);
     }
@@ -798,10 +795,13 @@ int doorbell_audio_turn_on(audio_parameters_t *parameters)
 
     const char *service_name = ntwk_trans_get_service_name();
 
+    /* On failure fall through to error: the pipeline is already started here,
+     * so a bare return would leak the voice handles and leave the mic loop
+     * running (endless ntwk_trans_audio_send with no sink). */
     if (service_name == NULL)
     {
         LOGE("%s, service_name is NULL\n", __func__);
-        return BK_FAIL;
+        goto error;
     }
     if (strcmp(service_name, "cs2_service") == 0)
     {
@@ -810,6 +810,8 @@ int doorbell_audio_turn_on(audio_parameters_t *parameters)
 
     return BK_OK;
 error:
+    gl_db_audio_device_info->audio_enable = BK_FALSE;
+
     if (gl_db_audio_device_info->voice_read_handle)
     {
         bk_voice_read_stop(gl_db_audio_device_info->voice_read_handle);

@@ -278,6 +278,10 @@ static void doorbell_message_handle(void *param)
 
                     doorbell_video_transfer_turn_off();
 
+#ifdef CONFIG_VOICE_SERVICE
+                    doorbell_audio_turn_off();
+#endif
+
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     if (db_info->service == DOORBELL_SERVICE_LAN_TCP)
                     {
@@ -294,9 +298,7 @@ static void doorbell_message_handle(void *param)
                      * already closed (video_enable/lcd_enable == false). */
                     doorbell_camera_turn_off();
                     doorbell_display_turn_off();
-#ifdef CONFIG_VOICE_SERVICE
-                    doorbell_audio_turn_off();
-#endif
+
                     #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     /* Abrupt disconnect: phone may not have sent TURN_OFF, clear stale
                      * votes so the keepalive idle check can detect idle and sleep. */
