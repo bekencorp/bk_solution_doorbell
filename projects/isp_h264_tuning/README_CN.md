@@ -39,7 +39,7 @@ PC 通过 JSON-RPC 的 `method` 字段选择 H264E 或 ISP 模块；同一时刻
 | 帧率 | 20 fps | |
 | H264E 码率 | 1200 kbps | `setRateControl` 可改 |
 | 传感器 | GC2053 / CV2005 / SC3336 | defconfig 均已启用 |
-| Wi-Fi STA | 上电自动连接 | SSID/密码在 `ap_main.c` 中配置 |
+| Wi-Fi STA | 串口 CLI 连接 | `wifi_sta connect <ssid> <password>` |
 | BLE / USB | 关闭 | 纯 Wi-Fi 联调工程 |
 
 支持分辨率：**2304×1296**、**1920×1080**、**1280×720**（CLI 支持 `1080p` / `720p` 简写）。
@@ -108,7 +108,7 @@ media preview example ready.
 ```text
 projects/isp_h264_tuning/
 ├── ap/
-│   ├── ap_main.c                 # Wi-Fi 自动连接 + 服务自启动
+│   ├── ap_main.c                 # Wi-Fi CLI + 预览服务自启动
 │   ├── media_preview_server.c    # 统一 RPC 分发
 │   ├── h264e_stream_project.c    # H264E 模块
 │   ├── isp_frame_project.c       # ISP 抓帧模块
@@ -125,6 +125,9 @@ projects/isp_h264_tuning/
 ## 6 CLI 命令
 
 ```text
+# Wi-Fi
+wifi_sta connect MyRouter mypassword
+
 # 统一预览服务
 ap_cmd media_preview start 2304x1296 20
 ap_cmd media_preview start 1080p 25          # 简写分辨率
@@ -197,7 +200,7 @@ ap_cmd isp_frame server stop
 
 **Q: Wi-Fi 连接失败？**
 
-A: 在 `ap_main.c` 中修改 `MEDIA_PREVIEW_STA_SSID` / `MEDIA_PREVIEW_STA_PASSWORD` 后重新编译，或通过 SDK Wi-Fi CLI 手动连接。
+A: 串口执行 `wifi_sta connect <ssid> <password>`，确认 SSID/密码正确且 PC 与板端在同一网络。
 
 **Q: PC 连上 7100 但 7150 无数据？**
 

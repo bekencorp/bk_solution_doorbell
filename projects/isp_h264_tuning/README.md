@@ -39,7 +39,7 @@ PC selects H264E or ISP module via JSON-RPC `method`. Only one module is active 
 | FPS | 20 | |
 | H264E bitrate | 1200 kbps | change via `setRateControl` |
 | Sensors | GC2053 / CV2005 / SC3336 | all enabled in defconfig |
-| Wi-Fi STA | auto connect on boot | SSID/password in `ap_main.c` |
+| Wi-Fi STA | UART CLI | `wifi_sta connect <ssid> <password>` |
 | BLE / USB | disabled | Wi-Fi-only tuning project |
 
 Supported resolutions: 2304×1296, 1920×1080, 1280×720 (CLI shorthand `1080p` / `720p`).
@@ -68,7 +68,7 @@ MIPI pins (same as doorbell, see `h264e_stream_project.c` / `isp_frame_project.c
 ```text
 projects/isp_h264_tuning/
 ├── ap/
-│   ├── ap_main.c                 # Wi-Fi auto connect + service auto start
+│   ├── ap_main.c                 # Wi-Fi CLI + preview service auto start
 │   ├── media_preview_server.c    # unified RPC dispatch
 │   ├── h264e_stream_project.c    # H264E module
 │   ├── isp_frame_project.c       # ISP capture module
@@ -125,6 +125,9 @@ media preview example ready.
 ## 6 CLI
 
 ```text
+# Wi-Fi
+wifi_sta connect MyRouter mypassword
+
 # unified preview service
 ap_cmd media_preview start 2304x1296 20
 ap_cmd media_preview start 1080p 25          # shorthand resolution
@@ -197,7 +200,7 @@ Other supported method prefixes: `isp.*`, `isp_capture.*`, `doorbell.isp.*`.
 
 **Q: Wi-Fi connection fails?**
 
-A: Edit `MEDIA_PREVIEW_STA_SSID` / `MEDIA_PREVIEW_STA_PASSWORD` in `ap_main.c` and rebuild, or connect manually via SDK Wi-Fi CLI.
+A: Run `wifi_sta connect <ssid> <password>` on UART. Verify credentials and that PC and board are on the same network.
 
 **Q: PC connects to 7100 but no data on 7150?**
 

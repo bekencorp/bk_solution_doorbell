@@ -297,6 +297,7 @@ static void cli_isp_frame_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc
              NTWK_TRANS_TCP_VIDEO_PORT);
         LOGI("=== H264E module (separate) ===\n");
         LOGI("  h264e_stream server start ...\n");
+        LOGI("  isp_frame tuning start|stop\n");
         return;
     }
 
@@ -319,6 +320,27 @@ static void cli_isp_frame_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc
             LOGE("isp_frame server start failed: %d\n", ret);
         }
         return;
+    }
+
+    // External function declarations for ISP tuning server
+    extern void isp_tuning_server_init(void);
+    extern void isp_tuning_server_deinit(void);
+
+    if (os_strcmp(argv[1], "tuning") == 0) {
+        if (argc < 3) {
+            LOGI("usage: isp_frame tuning start|stop\n");
+            return;
+        }
+        if (os_strcmp(argv[2], "start") == 0) {
+            isp_tuning_server_init();
+            LOGI("ISP tuning server started successfully\n");
+            ret = AVDK_ERR_OK;
+        }
+        else if (os_strcmp(argv[2], "stop") == 0) {
+            isp_tuning_server_deinit();
+            LOGI("ISP tuning server stopped successfully\n");
+            ret = AVDK_ERR_OK;
+        }
     }
 
     LOGI("unknown subcommand, run: ap_cmd isp_frame\n");
