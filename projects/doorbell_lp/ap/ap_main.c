@@ -98,6 +98,6 @@ int main(void)
 
     doorbell_ipc_wakeup_env_init();
     doorbell_keepalive_handle_wakeup_reason();
-    doorbell_keepalive_cli_init();
+    //doorbell_keepalive_cli_init();
     return 0;
 }
