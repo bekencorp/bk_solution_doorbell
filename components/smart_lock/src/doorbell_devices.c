@@ -5,6 +5,7 @@
 
 #include "doorbell_cmd.h"
 #include "doorbell_devices.h"
+#include "network_transfer.h"
 #include "modules/wifi.h"
 #include "app_camera.h"
 #include "app_display.h"
@@ -928,6 +929,7 @@ bk_err_t doorbell_devices_stop(void)
     }
 
     s_db_trans_cfg->enable = 0;
+    ntwk_trans_chan_abort(NTWK_TRANS_CHAN_VIDEO, true);
     rtos_get_semaphore(&s_db_trans_cfg->sem, BEKEN_NEVER_TIMEOUT);
 
     bk_wifi_set_wifi_media_mode(false);
@@ -1047,6 +1049,7 @@ bk_err_t doorbell_devices_start(uint16_t img_format)
     memset(s_db_trans_cfg, 0, sizeof(db_trans_cfg_t));
 
     bk_encoded_data_manager_init();
+    ntwk_trans_chan_abort(NTWK_TRANS_CHAN_VIDEO, false);
 
     s_db_trans_cfg->img_format = img_format;
 
