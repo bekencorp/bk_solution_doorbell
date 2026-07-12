@@ -459,6 +459,12 @@ static void db_keepalive_tx_handler(void *arg)
         goto _exit;
     }
 
+    // Send first keepalive immediately after connection is established
+    if (s_keepalive_env.keepalive_ongoing && s_keepalive_env.sock >= 0) {
+        LOGI("%s: Sending first keepalive immediately\n", __func__);
+        db_keepalive_send_heartbeat();
+    }
+
     // Start RX thread
     ret = db_keepalive_init_rx();
     if (ret != BK_OK) {
@@ -494,12 +500,6 @@ static void db_keepalive_tx_handler(void *arg)
     }
 
     LOGI("%s: Keepalive started, interval=%u ms\n", __func__, s_keepalive_env.interval_ms);
-
-    // Send first keepalive immediately after connection is established
-    if (s_keepalive_env.keepalive_ongoing && s_keepalive_env.sock >= 0) {
-        LOGI("%s: Sending first keepalive immediately\n", __func__);
-        db_keepalive_send_heartbeat();
-    }
 
     // Main loop: send heartbeat periodically
     // Use RTC timer for low voltage sleep wakeup

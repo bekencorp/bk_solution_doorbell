@@ -112,6 +112,7 @@ typedef enum
     DBCMD_KEEP_ALIVE_REQUEST = 17,
     DBCMD_KEEP_ALIVE_RESPONSE = 18,
     DBCMD_WAKE_UP_REQUEST = 19,
+    DBCMD_DEVICE_POWER_ON_NOTIFY = 20,
 
     DBCMD_PNG = 100,
 
@@ -119,7 +120,7 @@ typedef enum
 
 /**
  * @brief Initialize keepalive module
- * 
+ *
  * @param cfg Keepalive configuration from AP side
  * @return bk_err_t BK_OK on success, BK_FAIL on error
  */
@@ -127,21 +128,21 @@ bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg);
 
 /**
  * @brief Deinitialize keepalive module
- * 
+ *
  * @return bk_err_t BK_OK on success, BK_FAIL on error
  */
 bk_err_t db_keepalive_cp_deinit(void);
 
 /**
  * @brief Start keepalive
- * 
+ *
  * @return bk_err_t BK_OK on success, BK_FAIL on error
  */
 bk_err_t db_keepalive_cp_start(void);
 
 /**
  * @brief Stop keepalive
- * 
+ *
  * @return bk_err_t BK_OK on success, BK_FAIL on error
  */
 bk_err_t db_keepalive_cp_stop(void);
