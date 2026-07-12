@@ -45,7 +45,7 @@ CPU 分工（相对 doorbell 的差异见 2.2）：
 
 ### 3.1 硬件准备
 
-与 doorbell 相同：BK7259 开发板、MIPI LCD、MIPI/UVC 摄像头、Speaker/Mic。
+与 doorbell 相同：BK7259 开发板、MIPI LCD、MIPI 摄像头、UVC 摄像头、Speaker/Mic。doorbell_lp 工程不支持 DVP 摄像头。
 
 ### 3.2 编译
 
@@ -71,9 +71,31 @@ ka                          # 显示帮助
 ka interval <ms>            # 设置空闲检测间隔（最小 3000ms，最大 300000ms，持久化到 Flash）
 ```
 
-## 4 低功耗保活实现机制
+## 4 工程目录
 
-### 4.1 整体架构
+```
+projects/doorbell_lp
+├── ap/
+│   ├── ap_main.c                 # doorbell 配置 + 保活初始化
+│   ├── audio_param/
+│   └── config/bk7259_ap/defconfig
+├── cp/
+│   ├── cp_main.c
+│   ├── keepalive/                # CP 保活服务（TX/RX 线程、RTC、心跳）
+│   │   ├── db_keepalive.c
+│   │   └── db_keepalive.h
+│   ├── db_ipc_msg/               # AP↔CP IPC 消息路由
+│   ├── db_pack/                  # 数据打包协议
+│   └── powerctrl/                # AP 上下电（pl_wakeup_host / pl_power_down_host）
+├── partitions/bk7259/
+├── CMakeLists.txt
+├── Makefile
+└── dbuild.sh
+```
+
+## 5 低功耗保活实现机制
+
+### 5.1 整体架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -90,7 +112,7 @@ ka interval <ms>            # 设置空闲检测间隔（最小 3000ms，最大 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 保活启动流程
+### 5.2 保活启动流程
 
 ```
 AP 定时检查 doorbell_mm_service_get_status()（默认 10 秒）
@@ -116,7 +138,7 @@ TX 线程：pl_power_down_host() 关闭 AP
 
 **注意**：若当前为 CS2 P2P 模式，需先切换到 TCP/UDP，保活仅支持 TCP。
 
-### 4.3 唤醒流程
+### 5.3 唤醒流程
 
 ```
 服务器 → DBCMD_WAKE_UP_REQUEST
@@ -137,7 +159,7 @@ doorbell_keepalive_handle_wakeup_reason()
 恢复正常 doorbell 业务
 ```
 
-### 4.4 唤醒原因标志
+### 5.4 唤醒原因标志
 
 定义见 `doorbell_keepalive.h`：
 
@@ -148,7 +170,7 @@ doorbell_keepalive_handle_wakeup_reason()
 | `POWERUP_KEEPALIVE_DISCONNECTION`     | 3  | 保活断连唤醒                 |
 | `POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG`  | 4  | 保活失败唤醒                 |
 
-### 4.5 AP 侧实现细节
+### 5.5 AP 侧实现细节
 
 **多媒体状态位**（`doorbell_mm_service_get_status()`）：
 
@@ -165,7 +187,7 @@ doorbell_keepalive_handle_wakeup_reason()
 3. 服务停止成功后（或无需停止）→ 发送 IPC 保活启动命令
 4. 若服务仍在运行（如有活跃会话）→ 跳过，等待下次检查
 
-### 4.6 CP 侧实现细节
+### 5.6 CP 侧实现细节
 
 **TX 线程主流程**（`db_keepalive_tx_handler`）：
 
@@ -194,7 +216,7 @@ LwIP 默认临时端口范围 0xc000–0xffff，不在 CP 本地端口范围（0
 CP 接收通路按目的端口分流：落在 CP 范围内的报文送 CP 协议栈，否则送 AP。
 保活 socket 显式 bind 到 CP 范围，确保对端回包由 CP 正确处理。
 
-### 4.7 配置参数
+### 5.7 配置参数
 
 | 参数           | 默认值         | 宏定义                                  | 说明                  |
 | -------------- | -------------- | --------------------------------------- | --------------------- |
@@ -208,9 +230,9 @@ CP 接收通路按目的端口分流：落在 CP 范围内的报文送 CP 协议
 | 空闲检测最小值 | 3 秒           | `MM_STATUS_CHECK_MIN_INTERVAL_MS`     | CLI 下限              |
 | CP 绑定端口    | 0x1000–0x1010 | `DB_KEEPALIVE_CP_BIND_PORT_START/END` | 17 个端口             |
 
-## 5 API 参考
+## 6 API 参考
 
-### 5.1 AP 侧（`components/smart_lock/`）
+### 6.1 AP 侧（`components/smart_lock/`）
 
 **保活管理**（`doorbell_keepalive.h`）：
 
@@ -239,7 +261,7 @@ IPC 命令枚举：
 | `DOORBELL_IPC_CMD_KEEPALIVESTOP`             | 0x0003 | AP → CP |
 | `DOORBELL_IPC_EVENT_KEEPALIVE_DISCONNECTION` | 0x1002 | CP → AP |
 
-### 5.2 CP 侧（`cp/keepalive/db_keepalive.h`）
+### 6.2 CP 侧（`cp/keepalive/db_keepalive.h`）
 
 ```c
 bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg);
@@ -248,33 +270,11 @@ bk_err_t db_keepalive_cp_start(void);
 bk_err_t db_keepalive_cp_stop(void);
 ```
 
-### 5.3 电源管理（`cp/powerctrl/powerctrl.h`）
+### 6.3 电源管理（`cp/powerctrl/powerctrl.h`）
 
 ```c
 void pl_wakeup_host(uint32_t flag);
 void pl_power_down_host(void);
-```
-
-## 6 工程目录
-
-```
-projects/doorbell_lp
-├── ap/
-│   ├── ap_main.c                 # doorbell 配置 + 保活初始化
-│   ├── audio_param/
-│   └── config/bk7259_ap/defconfig
-├── cp/
-│   ├── cp_main.c
-│   ├── keepalive/                # CP 保活服务（TX/RX 线程、RTC、心跳）
-│   │   ├── db_keepalive.c
-│   │   └── db_keepalive.h
-│   ├── db_ipc_msg/               # AP↔CP IPC 消息路由
-│   ├── db_pack/                  # 数据打包协议
-│   └── powerctrl/                # AP 上下电（pl_wakeup_host / pl_power_down_host）
-├── partitions/bk7259/
-├── CMakeLists.txt
-├── Makefile
-└── dbuild.sh
 ```
 
 ## 7 常见问题

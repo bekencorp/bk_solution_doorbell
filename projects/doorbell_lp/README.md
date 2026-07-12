@@ -45,7 +45,7 @@ CPU split (see section 2.2 for differences vs doorbell):
 
 ### 3.1 Hardware
 
-Same as doorbell: BK7259 board, MIPI LCD, MIPI/UVC camera, speaker/mic.
+Same as doorbell: BK7259 board, MIPI LCD, MIPI camera, UVC camera, speaker/mic. The doorbell_lp project does not support DVP cameras.
 
 ### 3.2 Build
 
@@ -71,9 +71,31 @@ ka                          # show help
 ka interval <ms>            # idle check interval (3000–300000 ms, persisted to Flash)
 ```
 
-## 4 Keepalive Implementation
+## 4 Layout
 
-### 4.1 Architecture
+```
+projects/doorbell_lp
+├── ap/
+│   ├── ap_main.c                 # doorbell config + keepalive init
+│   ├── audio_param/
+│   └── config/bk7259_ap/defconfig
+├── cp/
+│   ├── cp_main.c
+│   ├── keepalive/                # CP keepalive (TX/RX, RTC, heartbeat)
+│   │   ├── db_keepalive.c
+│   │   └── db_keepalive.h
+│   ├── db_ipc_msg/               # AP↔CP IPC routing
+│   ├── db_pack/                  # framing protocol
+│   └── powerctrl/                # pl_wakeup_host / pl_power_down_host
+├── partitions/bk7259/
+├── CMakeLists.txt
+├── Makefile
+└── dbuild.sh
+```
+
+## 5 Keepalive Implementation
+
+### 5.1 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -90,7 +112,7 @@ ka interval <ms>            # idle check interval (3000–300000 ms, persisted t
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 Keepalive start flow
+### 5.2 Keepalive start flow
 
 ```
 AP periodically checks doorbell_mm_service_get_status() (default 10 s)
@@ -116,7 +138,7 @@ send first heartbeat (DBCMD_KEEP_ALIVE_REQUEST), enter 30 s RTC loop
 
 **Note**: if CS2 P2P mode is active, switch to TCP/UDP first — keepalive is TCP-only.
 
-### 4.3 Wake-up flow
+### 5.3 Wake-up flow
 
 ```
 Server → DBCMD_WAKE_UP_REQUEST
@@ -137,7 +159,7 @@ send pending wake response
 resume normal doorbell business
 ```
 
-### 4.4 Wake flags
+### 5.4 Wake flags
 
 Defined in `doorbell_keepalive.h`:
 
@@ -148,7 +170,7 @@ Defined in `doorbell_keepalive.h`:
 | `POWERUP_KEEPALIVE_DISCONNECTION` | 3 | keepalive disconnect wake |
 | `POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG` | 4 | keepalive failure wake |
 
-### 4.5 AP-side details
+### 5.5 AP-side details
 
 **Multimedia status bits** (`doorbell_mm_service_get_status()`):
 
@@ -165,7 +187,7 @@ All three zero → idle → keepalive countdown starts.
 3. After service stops (or no stop needed) → send IPC keepalive start
 4. If service still running (active session) → skip, wait for next check
 
-### 4.6 CP-side details
+### 5.6 CP-side details
 
 **TX thread** (`db_keepalive_tx_handler`):
 
@@ -187,7 +209,7 @@ All three zero → idle → keepalive countdown starts.
 
 **CP port binding**: LwIP ephemeral ports (0xc000–0xffff) fall outside CP local range (0x1000–0x1010). CP receive path routes by destination port. Keepalive socket explicitly binds to CP range so peer replies reach CP stack.
 
-### 4.7 Configuration
+### 5.7 Configuration
 
 | Parameter | Default | Macro | Notes |
 | --- | --- | --- | --- |
@@ -201,9 +223,9 @@ All three zero → idle → keepalive countdown starts.
 | Idle check minimum | 3 s | `MM_STATUS_CHECK_MIN_INTERVAL_MS` | CLI lower bound |
 | CP bind ports | 0x1000–0x1010 | `DB_KEEPALIVE_CP_BIND_PORT_START/END` | 17 ports |
 
-## 5 API Reference
+## 6 API Reference
 
-### 5.1 AP side (`components/smart_lock/`)
+### 6.1 AP side (`components/smart_lock/`)
 
 **Keepalive management** (`doorbell_keepalive.h`):
 
@@ -232,7 +254,7 @@ IPC commands:
 | `DOORBELL_IPC_CMD_KEEPALIVESTOP` | 0x0003 | AP → CP |
 | `DOORBELL_IPC_EVENT_KEEPALIVE_DISCONNECTION` | 0x1002 | CP → AP |
 
-### 5.2 CP side (`cp/keepalive/db_keepalive.h`)
+### 6.2 CP side (`cp/keepalive/db_keepalive.h`)
 
 ```c
 bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg);
@@ -241,33 +263,11 @@ bk_err_t db_keepalive_cp_start(void);
 bk_err_t db_keepalive_cp_stop(void);
 ```
 
-### 5.3 Power control (`cp/powerctrl/powerctrl.h`)
+### 6.3 Power control (`cp/powerctrl/powerctrl.h`)
 
 ```c
 void pl_wakeup_host(uint32_t flag);
 void pl_power_down_host(void);
-```
-
-## 6 Layout
-
-```
-projects/doorbell_lp
-├── ap/
-│   ├── ap_main.c                 # doorbell config + keepalive init
-│   ├── audio_param/
-│   └── config/bk7259_ap/defconfig
-├── cp/
-│   ├── cp_main.c
-│   ├── keepalive/                # CP keepalive (TX/RX, RTC, heartbeat)
-│   │   ├── db_keepalive.c
-│   │   └── db_keepalive.h
-│   ├── db_ipc_msg/               # AP↔CP IPC routing
-│   ├── db_pack/                  # framing protocol
-│   └── powerctrl/                # pl_wakeup_host / pl_power_down_host
-├── partitions/bk7259/
-├── CMakeLists.txt
-├── Makefile
-└── dbuild.sh
 ```
 
 ## 7 FAQ

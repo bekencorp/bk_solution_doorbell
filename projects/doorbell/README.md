@@ -15,7 +15,7 @@ CPU split:
 
 | Module | Description |
 | --- | --- |
-| Camera | MIPI CSI (default GC2053, 1920×1080@25fps, NV12, Flexa) + UVC (enabled in defconfig) |
+| Camera | MIPI camera (1920×1080@25fps, NV12, Flexa) + UVC (enabled in defconfig) |
 | Display | MIPI DSI (default `lcd_device_hx8399c_mipi_1080x1920`), DPU video channel ARGB8888 |
 | GPU | VG-Lite Flexa 90° rotate / format convert / compress |
 | Codec | H.264 HW encoder, SW/HW JPEG decoder |
@@ -60,7 +60,7 @@ Flash this bin to BK7259v2.
 6. Camera and H.264 stream start automatically after provisioning (1920×1080)
 7. Toggle on-board LCD and audio from APK buttons
 
-> Connect MIPI camera, MIPI LCD, speaker and mic before testing. Plug UVC camera into USB if used.
+Connect the MIPI camera, MIPI LCD, speaker, and mic before testing. Plug the UVC camera into USB if used. The doorbell project does not support DVP cameras.
 
 ## 5 Layout
 

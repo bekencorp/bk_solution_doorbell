@@ -2,7 +2,7 @@
 
 * [English](./README.md)
 
-## 1. 概述
+## 1 概述
 
 本工程（`isp_h264_tuning`）是面向 **PC 端图像质量联调** 的独立工程，通过 Wi-Fi 提供统一的预览服务，支持 ISP 原始帧抓图和 H264E 编码码流两种模式。
 
@@ -31,7 +31,7 @@ PC 通过 JSON-RPC 的 `method` 字段选择 H264E 或 ISP 模块；同一时刻
 | `h264e_stream_project` | `ap/h264e_stream_project.c` | H264 编码会话、`h264EScream.*` RPC |
 | `isp_frame_project` | `ap/isp_frame_project.c` | ISP 抓帧会话、`ispFrame.*` RPC |
 
-## 2. 默认参数
+## 2 默认参数
 
 | 项 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -63,7 +63,47 @@ MIPI 引脚（与 doorbell 相同，见 `h264e_stream_project.c` / `isp_frame_pr
 | VIDEO 通道数据 | H.264 ES 码流 | NV12 原始帧 |
 | 典型用途 | 编码质量/码率调参 | ISP 图像质量调参 |
 
-## 3. 目录结构
+## 3 编译
+
+```bash
+cd projects/isp_h264_tuning
+SDK_DIR=/abs/path/to/avdk_sdk ./dbuild.sh make bk7259 PROJECT=isp_h264_tuning
+```
+
+产物：
+
+```
+projects/isp_h264_tuning/build/bk7259/isp_h264_tuning/package/all-app.bin
+```
+
+## 4 启动与 PC 连接
+
+### 4.1 上电自动流程
+
+1. `bk_init()` → `media_service_init()` → `devices_mgmt_init()`
+2. 注册 CLI（h264e / isp / media_preview）
+3. 自动连接 STA WiFi（参数见 `ap_main.c`）
+4. 自动启动 media_preview_server（2304×1296，20fps）
+
+### 4.2 串口日志
+
+```
+media preview example ready.
+  Unified server : default 2304x1296 @ 20fps
+  PC selects H264E or ISP by JSON-RPC method
+  CTRL:  TCP 7100 JSON-RPC (H264E or ISP methods)
+  VIDEO: TCP 7150 H264 ES or ISP frames
+  STA IP: x.x.x.x ...
+```
+
+### 4.3 PC 连接步骤
+
+1. 确保 PC 与开发板在同一 Wi-Fi 网络
+2. 从串口日志获取板端 IP
+3. PC 工具连接 `board_ip:7100`（CTRL）与 `board_ip:7150`（VIDEO）
+4. 通过 JSON-RPC 选择模块并控制启停
+
+## 5 工程目录
 
 ```text
 projects/isp_h264_tuning/
@@ -82,47 +122,7 @@ projects/isp_h264_tuning/
 └── dbuild.sh
 ```
 
-## 4. 编译
-
-```bash
-cd projects/isp_h264_tuning
-SDK_DIR=/abs/path/to/avdk_sdk ./dbuild.sh make bk7259 PROJECT=isp_h264_tuning
-```
-
-产物：
-
-```
-projects/isp_h264_tuning/build/bk7259/isp_h264_tuning/package/all-app.bin
-```
-
-## 5. 启动与 PC 连接
-
-### 5.1 上电自动流程
-
-1. `bk_init()` → `media_service_init()` → `devices_mgmt_init()`
-2. 注册 CLI（h264e / isp / media_preview）
-3. 自动连接 STA WiFi（参数见 `ap_main.c`）
-4. 自动启动 media_preview_server（2304×1296，20fps）
-
-### 5.2 串口日志
-
-```
-media preview example ready.
-  Unified server : default 2304x1296 @ 20fps
-  PC selects H264E or ISP by JSON-RPC method
-  CTRL:  TCP 7100 JSON-RPC (H264E or ISP methods)
-  VIDEO: TCP 7150 H264 ES or ISP frames
-  STA IP: x.x.x.x ...
-```
-
-### 5.3 PC 连接步骤
-
-1. 确保 PC 与开发板在同一 Wi-Fi 网络
-2. 从串口日志获取板端 IP
-3. PC 工具连接 `board_ip:7100`（CTRL）与 `board_ip:7150`（VIDEO）
-4. 通过 JSON-RPC 选择模块并控制启停
-
-## 6. CLI 命令
+## 6 CLI 命令
 
 ```text
 # 统一预览服务
@@ -137,7 +137,7 @@ ap_cmd isp_frame server start 2304x1296 20
 ap_cmd isp_frame server stop
 ```
 
-## 7. JSON-RPC 参考
+## 7 JSON-RPC 参考
 
 ### 7.1 通用控制
 
@@ -181,7 +181,7 @@ ap_cmd isp_frame server stop
 - 发送 stop method（如 `stop_encode`、`ispFrame.stop`）→ 释放当前模块
 - 若 method 与当前 active 模块不匹配，返回 JSON-RPC error `-32003`
 
-## 8. 关键 defconfig
+## 8 关键 defconfig
 
 | 配置项 | 说明 |
 | --- | --- |
@@ -193,7 +193,7 @@ ap_cmd isp_frame server stop
 | `# CONFIG_BLUETOOTH_AP` | BLE 关闭 |
 | `# CONFIG_USB` | USB 关闭 |
 
-## 9. 常见问题
+## 9 常见问题
 
 **Q: Wi-Fi 连接失败？**
 

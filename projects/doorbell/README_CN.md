@@ -15,7 +15,7 @@ CPU 分工：
 
 | 模块 | 说明 |
 | --- | --- |
-| 摄像头 | MIPI CSI（默认 GC2053，1920×1080@25fps，NV12，Flexa）+ UVC（defconfig 已启用） |
+| 摄像头 | MIPI 摄像头（1920×1080@25fps，NV12，Flexa）+ UVC（defconfig 已启用） |
 | 显示 | MIPI DSI（默认 `lcd_device_hx8399c_mipi_1080x1920`），DPU 视频通道 ARGB8888 |
 | GPU | VG-Lite Flexa 旋转 90° / 格式转换 / 压缩 |
 | 编解码 | H.264 硬编码，软/硬 JPEG 解码 |
@@ -61,7 +61,7 @@ projects/doorbell/build/bk7259/doorbell/package/all-app.bin
 6. 配网完成后会自动开启摄像头与 H.264 图传（分辨率 1920x1080）。
 7. 板载 LCD 与音频通过 APK 上的按钮控制开关。
 
-> 使用前请确认 MIPI 摄像头、MIPI LCD、Speaker、Mic 已正确接入开发板；若使用 UVC 摄像头，需接入 USB 接口。
+使用前请确认 MIPI 摄像头、MIPI LCD、Speaker、Mic 已正确接入开发板；若使用 UVC 摄像头，需接入 USB 接口。doorbell 工程不支持 DVP 摄像头。
 
 ## 5 工程目录
 
