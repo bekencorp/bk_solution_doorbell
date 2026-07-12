@@ -28,6 +28,7 @@ typedef struct
     uint16_t width;
     uint16_t height;
     uint32_t bitrate_kbps;
+    uint32_t gop_frame_count;
     uint8_t camera_started;
     void *isp_handle;
     bk_h264_encode_ctlr_handle_t enc_handle;
@@ -39,6 +40,7 @@ static h264e_stream_project_ctx_t s_project_ctx = {
     .width = 2304,
     .height = 1296,
     .bitrate_kbps = 1200,
+    .gop_frame_count = 20,
 };
 
 static void h264e_stream_project_log_json_chunks(const char *prefix, const char *json)
@@ -74,7 +76,7 @@ static void h264e_stream_project_log_mapped_vcenc_rate_ctrl(const bk_h264_encode
     LOGI("  vcencRateCtrl.qpMaxI=%u\n", rate_ctrl->qp_max_i);
     LOGI("  vcencRateCtrl.qpMinPB=%u\n", rate_ctrl->qp_min_p);
     LOGI("  vcencRateCtrl.qpMaxPB=%u\n", rate_ctrl->qp_max_p);
-    LOGI("  vcencRateCtrl.note=only mapped fields above are readable through current high-level API\n");
+    LOGI("  vcencRateCtrl.note=legacy rateCtrl view; run h264e_stream_config_get for full VCEnc fields\n");
 }
 
 static void h264e_stream_project_log_netif_ip(const char *name, netif_if_t netif)
@@ -174,6 +176,23 @@ static bk_err_t h264e_stream_project_set_video_profile(uint16_t width, uint16_t 
     return BK_OK;
 }
 
+static void h264e_stream_project_sync_session_video_config(void)
+{
+    uint16_t width = s_project_ctx.width;
+    uint16_t height = s_project_ctx.height;
+    uint16_t fps = s_project_ctx.fps;
+    uint32_t gop_frame_count = s_project_ctx.gop_frame_count;
+
+    if (h264e_stream_session_get_video_config(&width, &height, &fps, &gop_frame_count) != BK_OK) {
+        return;
+    }
+    if (h264e_stream_project_set_video_profile(width, height, fps) != BK_OK) {
+        LOGE("ignore invalid session video config %ux%u fps=%u\n", width, height, fps);
+        return;
+    }
+    s_project_ctx.gop_frame_count = gop_frame_count ? gop_frame_count : 20;
+}
+
 static bk_err_t h264e_stream_project_encode_prepare(void)
 {
     bk_err_t ret;
@@ -186,6 +205,8 @@ static bk_err_t h264e_stream_project_encode_prepare(void)
         LOGE("h264e_stream server not started, run: ap_cmd h264e_stream server start\n");
         return BK_ERR_STATE;
     }
+
+    h264e_stream_project_sync_session_video_config();
 
     s_project_ctx.isp_handle = app_isp_handle_get();
     if (s_project_ctx.isp_handle == NULL) {
@@ -226,6 +247,14 @@ static bk_err_t h264e_stream_project_encode_prepare(void)
         goto fail;
     }
 
+    if (s_project_ctx.gop_frame_count > 0) {
+        ret = bk_h264_encode_set_gop_frame_count(s_project_ctx.enc_handle, s_project_ctx.gop_frame_count);
+        if (ret != AVDK_ERR_OK) {
+            LOGE("set gop frame count failed: %d\n", ret);
+            goto fail;
+        }
+    }
+
     ret = bk_flexa_isp_h264e_bond_start(&s_project_ctx.h264e_bond,
                                         s_project_ctx.isp_handle,
                                         s_project_ctx.enc_handle);
@@ -241,8 +270,9 @@ static bk_err_t h264e_stream_project_encode_prepare(void)
     }
 
     s_project_ctx.encode_started = 1;
-    LOGI("[H264E module] encode prepared, resolution=%ux%u fps=%u\n",
-         s_project_ctx.width, s_project_ctx.height, s_project_ctx.fps);
+    LOGI("[H264E module] encode prepared, resolution=%ux%u fps=%u gop=%u\n",
+         s_project_ctx.width, s_project_ctx.height, s_project_ctx.fps,
+         s_project_ctx.gop_frame_count);
     return BK_OK;
 
 fail:
@@ -554,6 +584,7 @@ static void cli_h264e_stream_config_get_cmd(char *pcWriteBuffer, int xWriteBuffe
 {
     bk_h264_encode_rate_ctrl_t rate_ctrl = {0};
     bk_h264_encode_ctlr_handle_t enc_handle = s_project_ctx.enc_handle;
+    uint32_t gop_frame_count = s_project_ctx.gop_frame_count;
     avdk_err_t ret;
 
     (void)pcWriteBuffer;
@@ -572,6 +603,7 @@ static void cli_h264e_stream_config_get_cmd(char *pcWriteBuffer, int xWriteBuffe
     LOGI("  video.height=%u\n", s_project_ctx.height);
     LOGI("  video.fps=%u\n", s_project_ctx.fps);
     LOGI("  video.bitrateKbps=%u\n", s_project_ctx.bitrate_kbps);
+    LOGI("  video.gopFrameCount=%u\n", s_project_ctx.gop_frame_count);
     LOGI("  ctrl.forceIdr=true\n");
 
     if (enc_handle == NULL) {
@@ -593,6 +625,11 @@ static void cli_h264e_stream_config_get_cmd(char *pcWriteBuffer, int xWriteBuffe
     LOGI("  rateCtrl.qpMaxP=%u\n", rate_ctrl.qp_max_p);
     LOGI("  vcencRateCtrl.mapped:\n");
     h264e_stream_project_log_mapped_vcenc_rate_ctrl(&rate_ctrl);
+
+    ret = bk_h264_encode_get_gop_frame_count(enc_handle, &gop_frame_count);
+    if (ret == AVDK_ERR_OK) {
+        LOGI("  live.gopFrameCount=%u\n", gop_frame_count);
+    }
 }
 
 static void cli_h264e_stream_rc_get_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, char **argv)

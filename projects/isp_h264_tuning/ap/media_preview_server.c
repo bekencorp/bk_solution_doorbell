@@ -22,7 +22,7 @@
 #define LOGW(...) BK_LOGW(TAG, ##__VA_ARGS__)
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
 
-#define MEDIA_PREVIEW_JSON_MAX_LEN 2048
+#define MEDIA_PREVIEW_JSON_MAX_LEN 8192
 
 typedef enum
 {

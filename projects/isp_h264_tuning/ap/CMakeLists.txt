@@ -2,6 +2,8 @@ set(incs .)
 set(srcs
     ap_main.c
     media_preview_server.c
+    h264e_stream_schema.c
+    isp_frame_schema.c
     h264e_stream_project.c
     isp_frame_project.c
 )
