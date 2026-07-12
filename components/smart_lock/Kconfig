@@ -11,4 +11,29 @@ menu "Smart Lock"
         help
             Builds doorbell camera/media with kvs_service transport. Enable CONFIG_KVS_NTWK_BRIDGE
             and KVS/AWS options in the project defconfig.
+
+    choice H264_QP_PRESET
+        prompt "H.264 bitrate/QP preset"
+        default H264_QP_PRESET_DISABLED
+        help
+            Select one H.264 bitrate/QP preset.
+
+        config H264_QP_PRESET_DISABLED
+            bool "Disabled"
+
+        config H264_QP_PRESET_QUALITY
+            bool "Quality first: 2Mbps, I[20,40], P[24,40]"
+
+        config H264_QP_PRESET_FIXED_QP
+            bool "Fixed QP: bitrate off, I=21, P=26"
+
+        config H264_QP_PRESET_BALANCED
+            bool "Balanced: 1.5Mbps, I[22,42], P[26,44]"
+
+        config H264_QP_PRESET_ANTI_STUTTER
+            bool "Anti-stutter: 1.2Mbps, I[24,45], P[28,48]"
+
+        config H264_QP_PRESET_LAN_HD
+            bool "LAN HD: 3Mbps, I[18,36], P[22,38]"
+    endchoice
 endmenu

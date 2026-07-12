@@ -17,10 +17,12 @@
 #include "devices_mgmt.h"
 #include <sys_types.h>
 #include <modules/pm.h>
+#if CONFIG_MDS_SNAPSHOT || CONFIG_H264_QP_PRESET_QUALITY || CONFIG_H264_QP_PRESET_FIXED_QP || CONFIG_H264_QP_PRESET_BALANCED || CONFIG_H264_QP_PRESET_ANTI_STUTTER || CONFIG_H264_QP_PRESET_LAN_HD
+#include <components/bk_encode/bk_h264_encode_ctlr.h>
+#endif
 #ifdef CONFIG_MDS_SNAPSHOT
 #include "bk_snapshot.h"
 #include "bk_snapshot_sw.h"
-#include <components/bk_encode/bk_h264_encode_ctlr.h>
 #endif
 #if CONFIG_INTEGRATION_DOORBELL_KVS
 #include "doorbell_kvs_network_transfer.h"
@@ -41,6 +43,70 @@ typedef enum
 } lcd_status_t;
 
 db_device_info_t *db_device_info = NULL;
+
+#if CONFIG_H264_QP_PRESET_QUALITY || CONFIG_H264_QP_PRESET_FIXED_QP || CONFIG_H264_QP_PRESET_BALANCED || CONFIG_H264_QP_PRESET_ANTI_STUTTER || CONFIG_H264_QP_PRESET_LAN_HD
+static bk_err_t doorbell_apply_h264_qp_preset(void *encode_handle)
+{
+    bk_h264_encode_rate_ctrl_t rate_ctrl = {0};
+    const char *preset_name = NULL;
+    avdk_err_t ret;
+
+    if (encode_handle == NULL)
+    {
+        return BK_ERR_PARAM;
+    }
+
+#if CONFIG_H264_QP_PRESET_QUALITY
+    preset_name = "quality";
+    rate_ctrl.bitrate = 2000000;
+    rate_ctrl.qp_min_i = 20;
+    rate_ctrl.qp_max_i = 40;
+    rate_ctrl.qp_min_p = 24;
+    rate_ctrl.qp_max_p = 40;
+#elif CONFIG_H264_QP_PRESET_FIXED_QP
+    preset_name = "fixed-qp";
+    rate_ctrl.bitrate = 0;
+    rate_ctrl.qp_min_i = 21;
+    rate_ctrl.qp_max_i = 21;
+    rate_ctrl.qp_min_p = 26;
+    rate_ctrl.qp_max_p = 26;
+#elif CONFIG_H264_QP_PRESET_BALANCED
+    preset_name = "balanced";
+    rate_ctrl.bitrate = 1500000;
+    rate_ctrl.qp_min_i = 22;
+    rate_ctrl.qp_max_i = 42;
+    rate_ctrl.qp_min_p = 26;
+    rate_ctrl.qp_max_p = 44;
+#elif CONFIG_H264_QP_PRESET_ANTI_STUTTER
+    preset_name = "anti-stutter";
+    rate_ctrl.bitrate = 1200000;
+    rate_ctrl.qp_min_i = 24;
+    rate_ctrl.qp_max_i = 45;
+    rate_ctrl.qp_min_p = 28;
+    rate_ctrl.qp_max_p = 48;
+#elif CONFIG_H264_QP_PRESET_LAN_HD
+    preset_name = "lan-hd";
+    rate_ctrl.bitrate = 3000000;
+    rate_ctrl.qp_min_i = 18;
+    rate_ctrl.qp_max_i = 36;
+    rate_ctrl.qp_min_p = 22;
+    rate_ctrl.qp_max_p = 38;
+#endif
+
+    ret = bk_h264_encode_set_rate_ctrl((bk_h264_encode_ctlr_handle_t)encode_handle, &rate_ctrl);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("%s, apply h264 qp preset failed, ret = %d\n", __func__, ret);
+        return BK_FAIL;
+    }
+
+    LOGI("h264 qp preset %s: bitrate=%u i=[%u,%u] p=[%u,%u]\n",
+         preset_name, rate_ctrl.bitrate, rate_ctrl.qp_min_i, rate_ctrl.qp_max_i,
+         rate_ctrl.qp_min_p, rate_ctrl.qp_max_p);
+
+    return BK_OK;
+}
+#endif
 
 typedef struct
 {
@@ -351,6 +417,14 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
             goto err;
         }
 
+#if CONFIG_H264_QP_PRESET_QUALITY || CONFIG_H264_QP_PRESET_FIXED_QP || CONFIG_H264_QP_PRESET_BALANCED || CONFIG_H264_QP_PRESET_ANTI_STUTTER || CONFIG_H264_QP_PRESET_LAN_HD
+        ret = doorbell_apply_h264_qp_preset(info->encode_handle);
+        if (ret != BK_OK)
+        {
+            goto err;
+        }
+#endif
+
         LOGI("%s %d decode_handle = %p, encode_handle = %p\r\n", __func__, __LINE__, info->decode_handle, info->encode_handle);
 
         ret = bk_flexa_mjpegd_h264e_bond_start(&info->h264e_bond, info->decode_handle, info->encode_handle);
@@ -406,6 +480,14 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
             LOGE("%s, app_h264_encode_handle_get failed\n", __func__);
             goto err;
         }
+
+#if CONFIG_H264_QP_PRESET_QUALITY || CONFIG_H264_QP_PRESET_FIXED_QP || CONFIG_H264_QP_PRESET_BALANCED || CONFIG_H264_QP_PRESET_ANTI_STUTTER || CONFIG_H264_QP_PRESET_LAN_HD
+        ret = doorbell_apply_h264_qp_preset(info->encode_handle);
+        if (ret != BK_OK)
+        {
+            goto err;
+        }
+#endif
 
         ret = bk_flexa_isp_h264e_bond_start(&info->h264e_bond, info->isp_handle, info->encode_handle);
         if (ret != BK_OK) {
