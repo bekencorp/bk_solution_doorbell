@@ -16,10 +16,6 @@
 #include "app_jpeg_decode.h"
 #include "driver/isp.h"
 #include <driver/isp_types.h>
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-#include <driver/psram_types.h>
-#include <driver/psram.h>
-#endif
 #define TAG "app-gpu"
 
 #define LOGI(...) BK_LOGW(TAG, ##__VA_ARGS__)
@@ -32,10 +28,6 @@ static bk_gpu_ctlr_handle_t s_gpu_handle = NULL;
 
 gpu_board_config_t *gpu_board_config = NULL;
 
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-static uint32_t s_psram_cover_area;   //todo: app_gpu_frame_malloc with params handler
-#endif
-
 static void *app_gpu_frame_malloc(uint32_t size)
 {
     void *disp_frame = NULL;
@@ -47,9 +39,10 @@ static void *app_gpu_frame_malloc(uint32_t size)
         return NULL;
     }
 #if (CONFIG_PSRAM_WRITE_THROUGH)
-    if (bk_psram_enable_write_through(s_psram_cover_area, (uint32_t)disp_frame, (uint32_t)(disp_frame + size)) != BK_OK)
+    if (bk_frame_buffer_set(disp_frame, BK_FRAME_BUFFER_FLAG_WRITE_THROUGH) != BK_OK)
     {
         LOGE("Failed to enable write through\r\n");
+        bk_frame_buffer_free(disp_frame);
         return NULL;
     }
 #endif
@@ -57,12 +50,6 @@ static void *app_gpu_frame_malloc(uint32_t size)
 }
 static avdk_err_t app_gpu_frame_free(void *ptr)
 {
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-    if (s_psram_cover_area < PSRAM_WRITE_THROUGH_AREA_COUNT)
-    {
-        bk_psram_disable_write_through(s_psram_cover_area);
-    }
-#endif
     if (ptr != NULL) {
         bk_frame_buffer_free(ptr);
     }
@@ -106,13 +93,6 @@ avdk_err_t app_gpu_turn_on(gpu_board_config_t *config)
 
 
     os_memset(&gpu_config, 0, sizeof(bk_gpu_ctlr_config_t));
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-    s_psram_cover_area = bk_psram_alloc_write_through_channel_with_psram_id(0);
-    if (s_psram_cover_area >= PSRAM_WRITE_THROUGH_AREA_COUNT) {
-        LOGE("alloc write-through channel failed\r\n");
-        return AVDK_ERR_GENERIC;
-    }
-#endif
     gpu_config.rotate_degree = config->flexa.degree;
     gpu_config.src_width = config->flexa.src_width;
     gpu_config.src_height = config->flexa.src_height;
@@ -198,15 +178,6 @@ avdk_err_t app_gpu_turn_off(bk_gpu_ctlr_handle_t ctlr)
         s_gpu_handle = NULL;
     }
 
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-    bk_err_t wt_ret = bk_psram_free_write_through_channel((psram_write_through_area_t)s_psram_cover_area);
-    if (wt_ret != BK_OK)
-    {
-        LOGW("%s, %d, free write-through channel failed: %d, area=%d\n", __func__, __LINE__, wt_ret, s_psram_cover_area);
-        return AVDK_ERR_GENERIC;
-    }
-#endif
-
     return AVDK_ERR_OK;
 }
 
@@ -275,21 +246,10 @@ avdk_err_t app_gpu_v2_turn_on(uint16_t width, uint16_t height)
 
     AVDK_RETURN_ON_FALSE((s_gpu_handle == NULL), AVDK_ERR_BUSY, TAG, "already turned on");
 
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-    s_psram_cover_area = bk_psram_alloc_write_through_channel_with_psram_id(0);
-    if (s_psram_cover_area >= PSRAM_WRITE_THROUGH_AREA_COUNT) {
-        LOGE("%s alloc write-through channel failed\r\n", __func__);
-        return AVDK_ERR_GENERIC;
-    }
-#endif
-
     ret = bk_gpu_ctlr_new(&s_gpu_handle, &gpu_config);
     if (ret != AVDK_ERR_OK)
     {
         LOGW("%s, %d\n", __func__, __LINE__);
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-        (void)bk_psram_free_write_through_channel((psram_write_through_area_t)s_psram_cover_area);
-#endif
         return ret;
     }
 
@@ -299,9 +259,6 @@ avdk_err_t app_gpu_v2_turn_on(uint16_t width, uint16_t height)
         LOGW("%s, %d\n", __func__, __LINE__);
         (void)bk_gpu_delete(s_gpu_handle);
         s_gpu_handle = NULL;
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-        (void)bk_psram_free_write_through_channel((psram_write_through_area_t)s_psram_cover_area);
-#endif
         return ret;
     }
 
@@ -311,9 +268,6 @@ avdk_err_t app_gpu_v2_turn_on(uint16_t width, uint16_t height)
         (void)bk_gpu_deinit(s_gpu_handle);
         (void)bk_gpu_delete(s_gpu_handle);
         s_gpu_handle = NULL;
-#if (CONFIG_PSRAM_WRITE_THROUGH)
-        (void)bk_psram_free_write_through_channel((psram_write_through_area_t)s_psram_cover_area);
-#endif
         return ret;
     }
 
