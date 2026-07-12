@@ -1,3 +1,4 @@
+# KCONFIG_GROUP: Solution & Product
 menu "Doorbell Service"
     config APP_USE_ISP_MP_CHANNEL
         depends on ISP

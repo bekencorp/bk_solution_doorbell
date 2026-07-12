@@ -1,3 +1,4 @@
+# KCONFIG_GROUP: Solution & Product
 menu "Smart Lock"
 
     config INTEGRATION_DOORBELL
