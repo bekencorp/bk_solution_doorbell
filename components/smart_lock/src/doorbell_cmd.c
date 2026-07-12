@@ -71,6 +71,18 @@ void doorbell_transmission_event_report(uint32_t opcode, uint8_t status, uint16_
     ntwk_trans_ctrl_send((uint8_t *)&evt, sizeof(db_evt_head_t));
 }
 
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+void doorbell_transmission_device_power_on_notify(void)
+{
+    LOGI("Notify device power on to server\r\n");
+    doorbell_transmission_event_report(DBCMD_DEVICE_POWER_ON_NOTIFY, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+}
+
+static void doorbell_device_power_on_notify_response_handle(uint32_t param, uint8_t *payload, uint16_t length)
+{
+
+}
+#endif
 
 static void doorbell_keep_alive_timer_handler(void *data)
 {
@@ -508,6 +520,12 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
         {
             LOGD("DBCMD_WAKE_UP_REQUEST\n");
             doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+        }
+        break;
+        case DBCMD_DEVICE_POWER_ON_NOTIFY:
+        {
+            LOGD("DBCMD_DEVICE_POWER_ON_NOTIFY\n");
+            doorbell_device_power_on_notify_response_handle(cmd.param, p, cmd.length);
         }
         break;
 #endif

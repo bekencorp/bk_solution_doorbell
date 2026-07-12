@@ -67,6 +67,7 @@ typedef enum
     DBCMD_KEEP_ALIVE_REQUEST = 17,
     DBCMD_KEEP_ALIVE_RESPONSE = 18,
     DBCMD_WAKE_UP_REQUEST = 19,
+    DBCMD_DEVICE_POWER_ON_NOTIFY = 20,
 #endif
     DBCMD_PNG = 100,
 } dbcmd_t;
@@ -74,6 +75,8 @@ typedef enum
 void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length);
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+void doorbell_transmission_device_power_on_notify(void);
+
 typedef enum
 {
     MM_STATUS_CAMERA_BIT = 0,
