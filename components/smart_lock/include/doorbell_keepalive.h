@@ -24,6 +24,7 @@ void doorbell_keepalive_on_service_start_success(void);
 void doorbell_keepalive_on_keepalive_disconnection(void);
 bk_err_t doorbell_keepalive_start_mm_status_check(void);
 bk_err_t doorbell_keepalive_stop_mm_status_check(void);
+void doorbell_keepalive_cancel_pending_service_stop(void);
 void doorbell_keepalive_send_keepalive(void);
 int doorbell_keepalive_cli_init(void);
 

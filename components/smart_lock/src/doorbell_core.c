@@ -348,6 +348,11 @@ static void doorbell_message_handle(void *param)
                 case DBEVT_LAN_TCP_SERVICE_STOP:
                 {
                     LOGD("DBEVT_LAN_TCP_SERVICE_STOP\n");
+                    if (doorbell_mm_service_get_status() != 0) {
+                        doorbell_keepalive_cancel_pending_service_stop();
+                        LOGI("Multimedia active, skip LAN TCP service stop\n");
+                        break;
+                    }
                     doorbell_bk_network_transfer_deinit("tcp_service");
                 }
                 break;
@@ -355,6 +360,11 @@ static void doorbell_message_handle(void *param)
                 case DBEVT_LAN_UDP_SERVICE_STOP:
                 {
                     LOGD("DBEVT_LAN_UDP_SERVICE_STOP\n");
+                    if (doorbell_mm_service_get_status() != 0) {
+                        doorbell_keepalive_cancel_pending_service_stop();
+                        LOGI("Multimedia active, skip LAN UDP service stop\n");
+                        break;
+                    }
                     doorbell_bk_network_transfer_deinit("udp_service");
                 }
                 break;

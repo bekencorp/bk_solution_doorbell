@@ -39,6 +39,14 @@ static doorbell_keepalive_env_t s_keepalive_env = {
 
 static void doorbell_keepalive_mm_status_check_timer_handler(void *larg, void *rarg);
 
+void doorbell_keepalive_cancel_pending_service_stop(void)
+{
+    if (s_keepalive_env.pending_keepalive_after_service_stop) {
+        s_keepalive_env.pending_keepalive_after_service_stop = false;
+        LOGI("pending keepalive service stop canceled\n");
+    }
+}
+
 static void db_set_keepalive_interval(const char *interval_str)
 {
     uint32_t interval_ms;
@@ -92,6 +100,7 @@ static void db_set_keepalive_interval(const char *interval_str)
 static bk_err_t doorbell_keepalive_stop_service_if_running(void)
 {
     bk_err_t ret;
+    uint32_t mm_status;
     db_ntwk_service_info_t service_info;
     doorbell_msg_t msg;
 
@@ -110,6 +119,12 @@ static bk_err_t doorbell_keepalive_stop_service_if_running(void)
     }
 
     LOGD("%s: Service type from flash: %d\n", __func__, service_info.db_service);
+
+    mm_status = doorbell_mm_service_get_status();
+    if (mm_status != 0) {
+        LOGI("Multimedia services are active (status: 0x%x), skip service stop\n", mm_status);
+        return BK_OK;
+    }
 
     // Stop the service if it's running (TCP or UDP)
     if (service_info.db_service == DOORBELL_SERVICE_LAN_TCP || 
@@ -162,7 +177,7 @@ static void doorbell_keepalive_mm_status_check_timer_handler(void *larg, void *r
         // Try to stop service if it's running (TCP or UDP)
         ret = doorbell_keepalive_stop_service_if_running();
         if (ret == BK_OK) {
-            // Service stop message was sent, keepalive will be sent after service stops
+            // Service stop was sent, or an active multimedia service canceled this keepalive path.
             return;
         }
 
