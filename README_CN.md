@@ -7,7 +7,7 @@ BK7259 SMP 门铃方案，包含可视门铃、低功耗保活门铃、无屏 IP
 | 工程 | 说明 |
 | --- | --- |
 | `doorbell` | 可视门铃：MIPI/UVC、H.264 图传、MIPI LCD、BLE 配网 |
-| `doorbell_lp` | 在 doorbell 基础上增加 AP 掉电、CP TCP 保活 |
+| `doorbell_lp` | 在 doorbell 基础上增加低功耗保活能力 |
 | `ipc` | 无屏 IPC：SC3336 2304×1296 |
 | `isp_h264_tuning` | ISP / H264E PC 端图像质量联调 |
 

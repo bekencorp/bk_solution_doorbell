@@ -7,7 +7,7 @@ BK7259 SMP doorbell solution: video doorbell, low-power keepalive, headless IPC,
 | Project | Description |
 | --- | --- |
 | `doorbell` | Video doorbell: MIPI/UVC, H.264 stream, MIPI LCD, BLE provisioning |
-| `doorbell_lp` | doorbell + AP power-down / CP TCP keepalive |
+| `doorbell_lp` | doorbell + low-power keepalive |
 | `ipc` | Headless IPC: SC3336 2304×1296 |
 | `isp_h264_tuning` | ISP / H264E PC-side tuning over Wi-Fi |
 
