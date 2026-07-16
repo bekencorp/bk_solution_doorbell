@@ -22,7 +22,6 @@
 
 static db_keepalive_env_t s_keepalive_env = {0};
 
-
 static void db_keepalive_sema_post_safe(void)
 {
     uint32_t flags = rtos_disable_int();
@@ -247,8 +246,81 @@ static void db_keepalive_set_keepalive_rtc(void)
 
 static void db_keepalive_stop_keepalive_rtc(void)
 {
-    // Force unregister previous if doesn't finish
+    // Force unregister previous if doesn't finish.
+    // Note: keepalive_rtc.name can be NULL if keepalive exits before the first
+    // db_keepalive_set_keepalive_rtc() call.
+    if (s_keepalive_env.keepalive_rtc.name == NULL) {
+        return;
+    }
     bk_alarm_unregister(AON_RTC_ID_1, s_keepalive_env.keepalive_rtc.name);
+}
+
+static void db_keepalive_release_resources_if_idle(void)
+{
+    bool should_release = false;
+    uint32_t flags;
+
+    // Atomically claim the teardown. Both RX and TX threads can funnel here on
+    // the normal stop path; exactly one side may release shared resources.
+    flags = rtos_disable_int();
+    if (s_keepalive_env.cleanup_requested &&
+        !s_keepalive_env.releasing &&
+        s_keepalive_env.tx_thread == NULL &&
+        s_keepalive_env.rx_thread == NULL) {
+        s_keepalive_env.releasing = true;
+        should_release = true;
+    }
+    rtos_enable_int(flags);
+
+    if (!should_release) {
+        return;
+    }
+
+    LOGI("%s: Releasing shared resources\n", __func__);
+
+    // Exclusive owner now: both worker threads have exited. Keep teardown
+    // idempotent because deinit can be requested before every runtime object
+    // is created.
+    db_keepalive_stop_keepalive_rtc();
+
+    if (s_keepalive_env.timer.handle) {
+        rtos_stop_timer(&s_keepalive_env.timer);
+        rtos_deinit_timer(&s_keepalive_env.timer);
+        s_keepalive_env.timer.handle = NULL;
+    }
+
+    if (s_keepalive_env.sock >= 0) {
+        closesocket(s_keepalive_env.sock);
+        s_keepalive_env.sock = -1;
+    }
+
+    db_pack_deinit();
+
+    if (s_keepalive_env.rx_buffer) {
+        os_free(s_keepalive_env.rx_buffer);
+        s_keepalive_env.rx_buffer = NULL;
+    }
+
+    if (s_keepalive_env.rx_raw_buffer) {
+        os_free(s_keepalive_env.rx_raw_buffer);
+        s_keepalive_env.rx_raw_buffer = NULL;
+    }
+
+    if (s_keepalive_env.sema) {
+        flags = rtos_disable_int();
+        if (s_keepalive_env.sema) {
+            rtos_deinit_semaphore(&s_keepalive_env.sema);
+            s_keepalive_env.sema = NULL;
+        }
+        rtos_enable_int(flags);
+    }
+
+    cif_filter_add_customer_filter(0, 0);
+
+    os_memset(&s_keepalive_env, 0, sizeof(db_keepalive_env_t));
+    s_keepalive_env.sock = -1;
+
+    LOGI("%s: Deinitialized\n", __func__);
 }
 
 static void db_keepalive_timer_handler(void *data)
@@ -383,6 +455,7 @@ static void db_keepalive_rx_handler(void *arg)
 {
     int ret;
     uint16_t received_len;
+    uint32_t flags;
 
     LOGI("%s: RX handler started\n", __func__);
 
@@ -405,7 +478,12 @@ static void db_keepalive_rx_handler(void *arg)
             continue;
         }
 
-        // Unpack the received data using db_pack
+        if (!s_keepalive_env.keepalive_ongoing) {
+            continue;
+        }
+
+        // RX owns db_pack cbuf/ccount; lifetime is protected by delaying
+        // db_pack_deinit until this thread exits.
         ret = db_pack_unpack(s_keepalive_env.rx_raw_buffer, received_len, 
                             db_keepalive_unpack_callback);
         if (ret < 0) {
@@ -420,7 +498,12 @@ _exit:
     /* Wake TX so it runs deinit (we do not run deinit here to avoid LwIP on wrong thread). */
     s_keepalive_env.keepalive_ongoing = false;
     db_keepalive_sema_post_safe();
+    /* Clear our handle atomically so final teardown can safely check whether
+     * both worker threads have exited. */
+    flags = rtos_disable_int();
     s_keepalive_env.rx_thread = NULL;
+    rtos_enable_int(flags);
+    db_keepalive_release_resources_if_idle();
     rtos_delete_thread(NULL);
 }
 
@@ -445,6 +528,7 @@ static bk_err_t db_keepalive_init_rx(void)
 static void db_keepalive_tx_handler(void *arg)
 {
     int ret;
+    uint32_t flags;
 
     LOGI("%s: TX handler started\n", __func__);
 
@@ -533,6 +617,12 @@ static void db_keepalive_tx_handler(void *arg)
 _exit:
     LOGI("%s: TX handler exited\n", __func__);
     db_keepalive_cp_deinit();
+    /* Clear our handle atomically so final teardown can safely check whether
+     * both worker threads have exited. */
+    flags = rtos_disable_int();
+    s_keepalive_env.tx_thread = NULL;
+    rtos_enable_int(flags);
+    db_keepalive_release_resources_if_idle();
     rtos_delete_thread(NULL);
 }
 
@@ -545,12 +635,16 @@ bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg)
         return BK_FAIL;
     }
 
-    if (s_keepalive_env.keepalive_ongoing) {
+    if (s_keepalive_env.keepalive_ongoing ||
+        s_keepalive_env.tx_thread != NULL ||
+        s_keepalive_env.rx_thread != NULL ||
+        s_keepalive_env.cleanup_requested) {
         LOGW("%s: Keepalive already ongoing\n", __func__);
         return BK_FAIL;
     }
 
     os_memset(&s_keepalive_env, 0, sizeof(db_keepalive_env_t));
+    s_keepalive_env.sock = -1;
 
     // Copy configuration
     os_strncpy(s_keepalive_env.server, cfg->server, sizeof(s_keepalive_env.server) - 1);
@@ -562,7 +656,7 @@ bk_err_t db_keepalive_cp_init(db_ipc_keepalive_cfg_t *cfg)
     s_keepalive_env.rx_buffer = (uint8_t *)os_malloc(DB_KEEPALIVE_MSG_BUFFER_SIZE);
     if (s_keepalive_env.rx_buffer == NULL) {
         LOGE("%s: Failed to allocate RX buffer\n", __func__);
-        return BK_FAIL;
+        goto exit;
     }
 
     // Allocate RX raw buffer for packed data (with db_pack header)
@@ -622,6 +716,7 @@ bk_err_t db_keepalive_cp_start(void)
                               NULL);
     if (ret != BK_OK) {
         LOGE("%s: Failed to create TX thread\n", __func__);
+        db_keepalive_cp_deinit();
         return BK_FAIL;
     }
 
@@ -646,6 +741,7 @@ bk_err_t db_keepalive_cp_deinit(void)
     LOGI("%s: Deinitializing\n", __func__);
 
     s_keepalive_env.keepalive_ongoing = false;
+    s_keepalive_env.cleanup_requested = true;
 
     // Stop RTC timer
     db_keepalive_stop_keepalive_rtc();
@@ -656,7 +752,6 @@ bk_err_t db_keepalive_cp_deinit(void)
         db_keepalive_exit_lv_sleep();
     }
 
-    // Stop timer
     if (s_keepalive_env.timer.handle) {
         rtos_stop_timer(&s_keepalive_env.timer);
         rtos_deinit_timer(&s_keepalive_env.timer);
@@ -668,33 +763,6 @@ bk_err_t db_keepalive_cp_deinit(void)
         s_keepalive_env.sock = -1;
     }
 
-    db_pack_deinit();
-
-    // Free resources
-    if (s_keepalive_env.rx_buffer) {
-        os_free(s_keepalive_env.rx_buffer);
-        s_keepalive_env.rx_buffer = NULL;
-    }
-
-    if (s_keepalive_env.rx_raw_buffer) {
-        os_free(s_keepalive_env.rx_raw_buffer);
-        s_keepalive_env.rx_raw_buffer = NULL;
-    }
-
-    if (s_keepalive_env.sema) {
-        uint32_t flags = rtos_disable_int();
-        if (s_keepalive_env.sema) {
-            rtos_deinit_semaphore(&s_keepalive_env.sema);
-            s_keepalive_env.sema = NULL;
-        }
-        rtos_enable_int(flags);
-    }
-
-    s_keepalive_env.lp_state = PM_MODE_NORMAL_SLEEP;
-    os_memset(&s_keepalive_env, 0, sizeof(db_keepalive_env_t));
-
-    cif_filter_add_customer_filter(0, 0);
-
-    LOGI("%s: Deinitialized\n", __func__);
+    db_keepalive_release_resources_if_idle();
     return BK_OK;
 }

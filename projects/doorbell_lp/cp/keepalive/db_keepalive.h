@@ -84,6 +84,8 @@ typedef struct {
     uint8_t lp_state;  // Low power state: PM_MODE_LOW_VOLTAGE or PM_MODE_NORMAL_SLEEP
     alarm_info_t keepalive_rtc;  // RTC alarm for low voltage sleep wakeup
     uint32_t keepalive_no_resp_cnt;  // Consecutive keepalive requests without response (watchdog)
+    bool cleanup_requested;  // Free shared resources after RX/TX threads have both exited
+    bool releasing;          // Exactly one thread performs the final teardown
 } db_keepalive_env_t;
 
 typedef enum
