@@ -3,22 +3,25 @@ Beken Armino Doorbell Solution (BK7259)
 
 :link_to_translation:`zh_CN:[中文]`
 
-This solution targets the BK7259 SMP dual-core platform (CP: M52, AP: M55) and ships doorbell, low-power keepalive, headless IPC, and ISP/H264E tuning projects.
+This solution targets the BK7259 SMP dual-core platform and ships doorbell, low-power keepalive, headless IPC, and ISP/H264E tuning projects.
 
 Example Projects
 ----------------
 
-+-------------------+----------------------------------------------------------+
-| Project           | Description                                              |
-+===================+==========================================================+
-| doorbell          | Video doorbell: MIPI/UVC capture, H.264 stream, MIPI LCD |
-+-------------------+----------------------------------------------------------+
-| doorbell_lp       | doorbell + AP power-down / CP TCP keepalive              |
-+-------------------+----------------------------------------------------------+
-| ipc               | Headless IPC: SC3336 2304×1296, shared doorbell stack    |
-+-------------------+----------------------------------------------------------+
-| isp_h264_tuning   | ISP / H264E PC-side tuning over Wi-Fi JSON-RPC           |
-+-------------------+----------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Project
+     - Description
+   * - doorbell
+     - Video doorbell: MIPI/UVC capture, H.264 stream, MIPI LCD
+   * - doorbell_lp
+     - doorbell + low-power keepalive
+   * - ipc
+     - Headless IPC: SC3336 2304×1296, shared doorbell stack
+   * - isp_h264_tuning
+     - ISP / H264E PC-side tuning over Wi-Fi JSON-RPC
 
 1. Dependencies
 ---------------

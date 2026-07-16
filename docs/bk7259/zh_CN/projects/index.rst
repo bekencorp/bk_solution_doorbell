@@ -5,8 +5,6 @@
 
 .. toctree::
     :maxdepth: 1
+    :glob:
 
-    doorbell/index
-    doorbell_lp/index
-    ipc/index
-    isp_h264_tuning/index
+    */index
