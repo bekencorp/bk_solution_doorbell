@@ -451,6 +451,8 @@ int doorbell_audio_turn_off(void)
     #endif
     const char *service_name = ntwk_trans_get_service_name();
 
+    ntwk_trans_chan_abort(NTWK_TRANS_CHAN_AUDIO, true);
+
     /* NULL service_name just means the network layer is already released;
      * don't abort local audio teardown, or the voice loop leaks. */
     if (service_name != NULL && strcmp(service_name, "cs2_service") == 0)
@@ -803,6 +805,9 @@ int doorbell_audio_turn_on(audio_parameters_t *parameters)
         LOGE("%s, service_name is NULL\n", __func__);
         goto error;
     }
+
+    ntwk_trans_chan_abort(NTWK_TRANS_CHAN_AUDIO, false);
+
     if (strcmp(service_name, "cs2_service") == 0)
     {
         ntwk_trans_chan_start(NTWK_TRANS_CHAN_AUDIO, NULL);
