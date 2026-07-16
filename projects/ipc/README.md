@@ -8,14 +8,7 @@ This project is the **IPC network camera firmware** in the doorbell solution, ba
 It reuses the `smart_lock` doorbell stack (BLE provisioning, TCP/UDP streaming, full-duplex audio, ASR),
 but **does not bring up the LCD/GPU display pipeline by default** — targeting headless IPC / network camera products.
 
-### 1.1 CPU split
-
-| Core | Role |
-| --- | --- |
-| CP (M52) | bk_init() and bk_start_ap_system() (same as doorbell) |
-| AP (M55) | media_service, devices_mgmt, doorbell business, ASR, AT commands |
-
-### 1.2 vs doorbell
+### 1.1 vs doorbell
 
 | Item | doorbell | ipc (this project) |
 | --- | --- | --- |

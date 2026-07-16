@@ -8,14 +8,7 @@
 与 `doorbell` 共用 `smart_lock` 门铃业务栈（BLE 配网、TCP/UDP 图传、双向音频、ASR），但 **默认不启用 LCD/GPU 显示链路**，
 面向无屏 IPC / 网络摄像头产品。
 
-### 1.1 CPU 分工
-
-| 核心 | 职责 |
-| --- | --- |
-| **CP**（M52） | `bk_init()` 与 `bk_start_ap_system()`（同 doorbell） |
-| **AP**（M55） | media_service、devices_mgmt、doorbell 业务、ASR、AT 命令 |
-
-### 1.2 与 doorbell 的定位差异
+### 1.1 与 doorbell 的定位差异
 
 | 对比项 | doorbell | ipc（本工程） |
 | --- | --- | --- |

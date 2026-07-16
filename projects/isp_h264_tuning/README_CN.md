@@ -114,7 +114,7 @@ projects/isp_h264_tuning/
 │   ├── isp_frame_project.c       # ISP 抓帧模块
 │   └── config/bk7259_ap/defconfig
 ├── cp/
-│   ├── cp_main.c                 # 仅引导 AP
+│   ├── cp_main.c
 │   └── config/bk7259/defconfig
 ├── partitions/bk7259/
 ├── CMakeLists.txt

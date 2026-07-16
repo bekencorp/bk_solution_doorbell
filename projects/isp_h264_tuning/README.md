@@ -74,7 +74,7 @@ projects/isp_h264_tuning/
 │   ├── isp_frame_project.c       # ISP capture module
 │   └── config/bk7259_ap/defconfig
 ├── cp/
-│   ├── cp_main.c                 # boot AP only
+│   ├── cp_main.c
 │   └── config/bk7259/defconfig
 ├── partitions/bk7259/
 ├── CMakeLists.txt

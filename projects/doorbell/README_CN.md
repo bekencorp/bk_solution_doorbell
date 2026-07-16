@@ -6,11 +6,6 @@
 
 本工程基于 BK7259 SMP 双核架构，实现完整的可视门铃功能：UVC/MIPI 摄像头采集、H.264 编码、Wi-Fi 实时音视频传输、BLE 配网、双向音频、ASR 唤醒等。
 
-CPU 分工：
-
-- **CP**（M52）：`bk_init()` 初始化 Wi-Fi 协议栈、BLE Controller、射频校准（`vnd_cal`）及 CIF 等与 AP 的通信底层；随后 `bk_start_ap_system()` 启动 AP，并持续运行无线侧控制（Wi-Fi/BLE 共存）。
-- **AP**（M55）：运行多媒体与门铃业务（`media_service`、`devices_mgmt`、`smart_lock` 的 doorbell_core/boarding/network、BLE Host、ASR 等）。
-
 ## 2 主要功能
 
 | 模块 | 说明 |
@@ -67,12 +62,12 @@ projects/doorbell/build/bk7259/doorbell/package/all-app.bin
 
 ```
 projects/doorbell
-├── ap/                       # AP 业务（doorbell + media + ASR）
+├── ap/
 │   ├── ap_main.c             # 板级 camera/display/gpu 配置
 │   ├── CMakeLists.txt
 │   ├── audio_param/
 │   └── config/bk7259_ap/defconfig
-├── cp/                       # CP（M52）：Wi-Fi/BLE Controller、vnd_cal，bk_start_ap_system() 启动 AP
+├── cp/
 │   ├── cp_main.c
 │   ├── CMakeLists.txt
 │   └── config/bk7259/defconfig

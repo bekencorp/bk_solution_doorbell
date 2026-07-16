@@ -6,11 +6,6 @@
 
 This project runs on the BK7259 SMP dual-core platform and provides full video doorbell capabilities: UVC/MIPI camera capture, H.264 encoding, real-time Wi-Fi A/V transmission, BLE provisioning, full-duplex audio, and ASR keyword wake-up.
 
-CPU split:
-
-- **CP** (M52): `bk_init()` brings up the Wi-Fi stack, BLE controller, RF calibration (`vnd_cal`) and CIF low-level AP↔CP link; then `bk_start_ap_system()` boots the AP and keeps running wireless control (Wi-Fi/BLE coexistence).
-- **AP** (M55): runs multimedia and doorbell business (`media_service`, `devices_mgmt`, `smart_lock` doorbell core/boarding/network, BLE host, ASR, etc.).
-
 ## 2 Features
 
 | Module | Description |
@@ -66,12 +61,12 @@ Connect the MIPI camera, MIPI LCD, speaker, and mic before testing. Plug the UVC
 
 ```
 projects/doorbell
-├── ap/                       # AP business (doorbell + media + ASR)
+├── ap/
 │   ├── ap_main.c             # board camera/display/gpu config
 │   ├── CMakeLists.txt
 │   ├── audio_param/
 │   └── config/bk7259_ap/defconfig
-├── cp/                       # CP (M52): Wi-Fi/BLE Controller, vnd_cal, bk_start_ap_system()
+├── cp/
 │   ├── cp_main.c
 │   ├── CMakeLists.txt
 │   └── config/bk7259/defconfig
