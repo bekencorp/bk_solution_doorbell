@@ -1,0 +1,19 @@
+menu "Video Intercom"
+
+    config SMART_INTERCOM
+        bool "Build the smart_intercom component (two-way video intercom)"
+        default n
+        help
+            Enables the smart_intercom component sources.
+
+    config SMART_INTERCOM_AUTO_TEST
+        bool "Build the on-device self-loopback test harness (auto_test/)"
+        depends on SMART_INTERCOM
+        default n
+
+    config SMART_INTERCOM_DL_ZEROCOPY
+        bool "Downlink video zero-copy (reassemble directly into decode slots)"
+        depends on SMART_INTERCOM
+        default n
+
+endmenu

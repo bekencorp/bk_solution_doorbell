@@ -1,0 +1,136 @@
+#include "bk_private/bk_init.h"
+#include <components/system.h>
+#include <os/os.h>
+#include <components/shell_task.h>
+#include <components/bk_frame_buffer.h>
+#include <stdint.h>
+#include <driver/gpio.h>
+#include <driver/gpio_types.h>
+#include "gpio_driver.h"
+#include "media_service.h"
+#include "app_display.h"
+#include "app_camera.h"
+#include "devices_mgmt.h"
+#include "app_gpu.h"
+#include "avdk_monitor.h"
+#ifdef CONFIG_INTEGRATION_DOORBELL
+#include "doorbell_comm.h"
+#include "doorbell_config.h"
+#endif
+#include <lcd/lcd_mipi_hx8399c_1080x1920.h>
+#include <doorbell_comm.h>
+#include "doorbell_ipc_msg.h"
+#include "doorbell_keepalive.h"
+#include "doorbell_selftest.h"
+
+int main(void)
+{
+    bk_init();
+    media_service_init();
+
+    bk_printf("M55 main running...\r\n");
+
+    camera_board_config_t camera_board = {0};
+    display_board_config_t display_board = {0};
+    gpu_board_config_t gpu_board = {0};
+
+    camera_board.mipi.enable = true;
+    camera_board.mipi.pin_scl = GPIO_69;
+    camera_board.mipi.pin_sda = GPIO_70;
+    camera_board.mipi.i2c_id = 1;
+    camera_board.mipi.pin_reset = GPIO_71;
+    camera_board.mipi.pin_pwdn = -1;
+    camera_board.mipi.pin_xclk = GPIO_59;
+    camera_board.mipi.sensor_max_width = 1920;
+    camera_board.mipi.sensor_max_height = 1080;
+    /* gc2053 1920x1080@15 is a supported sensor mode; 15fps lowers pixel
+     * throughput so the concurrent uplink-encode + downlink-decode + GPU
+     * composite (+ PIP) pipeline has more per-frame budget for validation. */
+    camera_board.mipi.sensor_fps = 15;
+    camera_board.isp.mp_enable = true;
+    camera_board.isp.mp_flexa = true;
+    /* Uplink encode source = ISP MP. Set to 256x144 (exact 16:9, uniform 7.5x
+     * downscale of the 1080p sensor). This is the seam-free HSRAM-safe sweet
+     * spot: at 256x144 the frame is 9 x 16-line rows, so a FULL-FRAME (no
+     * mid-picture wrap) FLEXA ring is only ~55KB (see DL_SEG_NUM=9) and fits
+     * HSRAM alongside the GPU 128KB composite + uplink encode + PIP. 512x288
+     * (18 rows) needed a full-frame ring of ~221KB that does NOT fit HSRAM, so
+     * it was forced onto a shallow 4-segment ring whose mid-picture ring-wrap
+     * de-syncs the h264d->GPU FLEXA bond and makes the downlink decoder raise
+     * VCDEC_DEC_INT_ERROR; 256x144 removes that wrap.
+     * IMPORTANT: both dimensions MUST be multiples of 16. The MP is a flexa
+     * channel read by the GPU in 16-line segments and is H.264-encoded in
+     * 16x16 macroblocks; a non-16 height (e.g. 360) corrupts the flexa/encode
+     * frame buffers and asserts in bk_mem_slab_free. 256/16=16, 144/16=9.
+     * The downlink decoder is configured to the same size for the loopback. */
+    camera_board.isp.mp_width = 256;
+    camera_board.isp.mp_height = 144;
+    camera_board.isp.mp_format = BK_PIXEL_FORMAT_NV12;
+    /* SP channel feeds the downlink PIP self-view (local camera small window).
+     * Enlarged to 640x360 to match the h264d_gpu_display_example PIP size (an
+     * exact 3x down-scale of the 1080p sensor, WeChat-style self-view). SP is a
+     * non-flexa channel (sp_flexa=false) so it is NOT bound by the 16-line
+     * flexa/H.264 macroblock rule that MP has: only the WIDTH must be 16-aligned
+     * for GPU/DMA stride (640/16=40) and both dims must be even for NV12 4:2:0
+     * (360 is even). MUST stay equal to DL_PIP_WIDTH/HEIGHT in
+     * doorbell_downlink_video.c. */
+    camera_board.isp.sp_enable = true;
+    camera_board.isp.sp_flexa = false;
+    camera_board.isp.sp_width = 640;
+    camera_board.isp.sp_height = 360;
+    camera_board.isp.sp_format = BK_PIXEL_FORMAT_NV12;
+    display_board.mipi.enable = true;
+    display_board.mipi.pin_reset = GPIO_60;
+    display_board.mipi.pin_backlight = GPIO_7;
+    display_board.mipi.panel = &lcd_device_hx8399c_mipi_1080x1920;
+    display_board.dpu_video.enable = true;
+    display_board.dpu_video.decompress = true;
+    display_board.dpu_video.format = BK_PIXEL_FORMAT_ARGB8888;
+
+
+    gpu_board.flexa.enable = true;
+    gpu_board.flexa.degree = 90;
+    /* Preview src follows ISP MP (256x144); dst stays panel pre-rotation
+     * 1920x1080, so the preview GPU scales 256x144 -> 1080P before the 90deg
+     * rotation. Must match camera_board.isp.mp_width/height (both /16). */
+    gpu_board.flexa.src_width = 256;
+    gpu_board.flexa.src_height = 144;
+    gpu_board.flexa.dst_width = 1920;
+    gpu_board.flexa.dst_height = 1080;
+    gpu_board.flexa.src_format = BK_PIXEL_FORMAT_NV12;
+    gpu_board.flexa.dst_format = BK_PIXEL_FORMAT_ARGB8888;
+    gpu_board.flexa.dst_compress = true;
+    gpu_board.flexa.scale = true;
+    gpu_board.flexa.tess_width = 0;
+    gpu_board.flexa.tess_height = 0;
+
+
+    bk_frame_buffer_init();
+
+    /* Board config for Multimedia config */
+    app_camera_board_config_set(&camera_board);
+    app_display_board_config_set(&display_board);
+    app_gpu_board_config_set(&gpu_board);
+
+    /* Debug config for Multimedia */
+    avdk_monitor_init();
+    avdk_monitor_start();
+
+    devices_mgmt_init();
+
+#if (defined(CONFIG_INTEGRATION_DOORBELL))
+    bk_doorbell_config_init();
+    doorbell_core_init();
+#endif
+
+#if CONFIG_VOICE_SERVICE_TEST
+    int cli_voice_init(void);
+    cli_voice_init();
+#endif
+
+    doorbell_ipc_wakeup_env_init();
+    doorbell_keepalive_handle_wakeup_reason();
+    //doorbell_keepalive_cli_init();
+    doorbell_selftest_cli_init();
+    return 0;
+}

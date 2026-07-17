@@ -1,48 +1,8 @@
-# KCONFIG_GROUP: Solution & Product
 menu "Smart Lock"
 
-    config INTEGRATION_DOORBELL
-        bool "Doorbell integration"
-        default n
+    config SMART_LOCK
+        bool "Build the smart_lock component (legacy binary control-channel doorbell leaf)"
+        depends on INTEGRATION_DOORBELL && !SMART_INTERCOM
+        default y
 
-    config INTEGRATION_DOORBELL_KVS
-        bool "Doorbell + AWS KVS (no BLE provisioning; use bk_network_transfer kvs_service)"
-        default n
-        help
-            Builds doorbell camera/media with kvs_service transport. Enable CONFIG_KVS_NTWK_BRIDGE
-            and KVS/AWS options in the project defconfig.
-
-    config DOORBELL_KEEPALIVE_ALWAYS_ON
-        bool "Doorbell keep network service always online"
-        default n
-        depends on NTWK_CLIENT_SERVICE_ENABLE
-        help
-            Keep the doorbell network service online after multimedia services
-            become idle. When disabled, the normal idle 10s AP power-down
-            keepalive flow is used.
-
-    choice H264_QP_PRESET
-        prompt "H.264 bitrate/QP preset"
-        default H264_QP_PRESET_DISABLED
-        help
-            Select one H.264 bitrate/QP preset.
-
-        config H264_QP_PRESET_DISABLED
-            bool "Disabled"
-
-        config H264_QP_PRESET_QUALITY
-            bool "Quality first: 2Mbps, I[20,40], P[24,40]"
-
-        config H264_QP_PRESET_FIXED_QP
-            bool "Fixed QP: bitrate off, I=21, P=26"
-
-        config H264_QP_PRESET_BALANCED
-            bool "Balanced: 1.5Mbps, I[22,42], P[26,44]"
-
-        config H264_QP_PRESET_ANTI_STUTTER
-            bool "Anti-stutter: 1.2Mbps, I[24,45], P[28,48]"
-
-        config H264_QP_PRESET_LAN_HD
-            bool "LAN HD: 3Mbps, I[18,36], P[22,38]"
-    endchoice
 endmenu
