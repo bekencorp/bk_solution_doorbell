@@ -1,8 +1,6 @@
 set(incs include)
 set(srcs .)
 set(priv_req bk_common)
-armino_build_get_property(armino_path ARMINO_PATH)
-set(tjpg_enc_dir ${armino_path}/properties/modules/video_codec/tjpg_enc)
 
 list(APPEND srcs 
 	src/mds_img_manager.c
@@ -24,16 +22,10 @@ endif()
 if (CONFIG_MDS_SNAPSHOT)
 list(APPEND incs
 	bk_codec_util/bk_snapshot/include
-	${tjpg_enc_dir}/include
 )
 list(APPEND srcs
 	bk_codec_util/bk_snapshot/src/bk_snapshot.c
 	bk_codec_util/bk_snapshot/src/sw_isp_snapshot.c
-	${tjpg_enc_dir}/src/tiny_jpeg.c
-	${tjpg_enc_dir}/src/tjpeg_image_chunk.c
-	${tjpg_enc_dir}/src/tjpeg_buffer.c
-	${tjpg_enc_dir}/src/dct.c
-	${tjpg_enc_dir}/jpeg_enc_sw.c
 )
 list(APPEND priv_req bk_encoder bk_camera)
 endif()

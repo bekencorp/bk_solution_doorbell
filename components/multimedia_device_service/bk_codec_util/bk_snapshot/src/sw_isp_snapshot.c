@@ -19,7 +19,7 @@
 #include <components/bk_isp_camera.h>
 #include <components/bk_camera_isp_ctlr.h>
 #include <components/bk_flexa_bond.h>
-#include <modules/jpeg_enc_sw.h>
+#include <components/bk_encode/bk_jpeg_encode_ctlr.h>
 #include <driver/isp_types.h>
 #include "bk_snapshot_sw.h"
 #include <common/avdk_pixel_types.h>
@@ -451,6 +451,14 @@ static avdk_err_t bk_snapshot_sw_nv12_to_yuyv(uint16_t width,
 	return AVDK_ERR_OK;
 }
 
+static uint32_t bk_snapshot_sw_jpege_outbuf_complete(bk_jpeg_encode_outbuf_info_t *info)
+{
+	if (info != NULL && info->args != NULL && info->status == BK_OK) {
+		*(uint32_t *)info->args = info->length;
+	}
+	return BK_OK;
+}
+
 static avdk_err_t bk_snapshot_sw_encode_yuyv(uint16_t width,
 					     uint16_t height,
 					     uint8_t *yuyv,
@@ -459,9 +467,11 @@ static avdk_err_t bk_snapshot_sw_encode_yuyv(uint16_t width,
 					     uint32_t *out_size)
 {
 	uint8_t *jpeg_buf;
-	uint16_t header_len = 0;
-	int enc_size = 0;
-	int ret;
+	bk_jpeg_encode_sw_frame_config_t enc_cfg;
+	bk_jpeg_encode_input_t enc_input;
+	bk_jpeg_encode_ctlr_handle_t enc_handle = NULL;
+	uint32_t encoded_size = 0;
+	avdk_err_t ret;
 
 	if (yuyv == NULL || out_jpeg == NULL || out_size == NULL) {
 		return AVDK_ERR_INVAL;
@@ -475,26 +485,43 @@ static avdk_err_t bk_snapshot_sw_encode_yuyv(uint16_t width,
 		return AVDK_ERR_NOMEM;
 	}
 
-	jpeg_sw_encoder_init();
-	ret = jpeg_sw_encoder.open(&jpeg_sw_encoder.codec, width, height, yuyv,
-				   jpeg_buf, &header_len, quality);
-	if (ret != BK_OK) {
-		LOGE("jpeg sw open failed ret=%d\r\n", ret);
+	enc_cfg = (bk_jpeg_encode_sw_frame_config_t) {
+		.width = width,
+		.height = height,
+		.input_format = BK_PIXEL_FORMAT_YUYV,
+		.quality = quality,
+		.outbuf_complete = bk_snapshot_sw_jpege_outbuf_complete,
+		.outbuf_complete_args = &encoded_size,
+	};
+	enc_input = (bk_jpeg_encode_input_t) {
+		.pic_buf = (uint32_t)(uintptr_t)yuyv,
+		.out_buf = (uint32_t)(uintptr_t)jpeg_buf,
+		.out_size = BK_SNAPSHOT_SW_JPEG_OUTBUF_SIZE,
+	};
+
+	ret = bk_jpeg_encode_sw_frame_new(&enc_handle, &enc_cfg);
+	if (ret == AVDK_ERR_OK) {
+		ret = bk_jpeg_encode_init(enc_handle);
+	}
+	if (ret == AVDK_ERR_OK) {
+		ret = bk_jpeg_encode_open(enc_handle);
+	}
+	if (ret == AVDK_ERR_OK) {
+		ret = bk_jpeg_encode_frame(enc_handle, &enc_input);
+	}
+	if (enc_handle != NULL) {
+		(void)bk_jpeg_encode_close(enc_handle);
+		(void)bk_jpeg_encode_deinit(enc_handle);
+		(void)bk_jpeg_encode_delete(enc_handle);
+	}
+	if (ret != AVDK_ERR_OK || encoded_size == 0) {
+		LOGE("jpeg sw encode failed ret=%d\r\n", ret);
 		bk_snapshot_sw_jpeg_buf_free(jpeg_buf);
-		return AVDK_ERR_GENERIC;
+		return (ret != AVDK_ERR_OK) ? ret : AVDK_ERR_GENERIC;
 	}
 
-	ret = jpeg_sw_encoder.enc(jpeg_sw_encoder.codec, jpeg_buf + header_len,
-				  BK_SNAPSHOT_SW_JPEG_OUTBUF_SIZE - header_len, &enc_size);
-	(void)jpeg_sw_encoder.deinit(&jpeg_sw_encoder.codec);
-	if (ret != BK_OK || enc_size <= 0) {
-		LOGE("jpeg sw encode failed ret=%d size=%d\r\n", ret, enc_size);
-		bk_snapshot_sw_jpeg_buf_free(jpeg_buf);
-		return AVDK_ERR_GENERIC;
-	}
-
+	*out_size = encoded_size;
 	*out_jpeg = jpeg_buf;
-	*out_size = (uint32_t)header_len + (uint32_t)enc_size;
 	return AVDK_ERR_OK;
 }
 
