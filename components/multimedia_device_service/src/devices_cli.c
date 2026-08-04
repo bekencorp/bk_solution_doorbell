@@ -15,9 +15,6 @@
 #include "app_gpu.h"
 #include "app_codec.h"
 #include "bk_image_action.h"
-#include <driver/gpio.h>
-#include <driver/gpio_types.h>
-#include "gpio_driver.h"
 #include <components/bk_lcd_panel.h>
 #include <components/bk_camera_bus.h>
 #include <components/bk_flexa_bond.h>
@@ -188,32 +185,20 @@ void cli_avdk_mds_isp_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, ch
              paramters->isp_output_width, paramters->isp_output_height, paramters->fps);
 
 
-        camera_board_config_t camera_config = {
-            .mipi = {
-                .enable = true,
-                .pin_scl = GPIO_69,
-                .pin_sda = GPIO_70,
-                .i2c_id = 1,
-                .pin_reset = GPIO_71,
-                .pin_pwdn = -1,
-                .pin_xclk = GPIO_59,
-                .sensor_max_width = paramters->camera_width,
-                .sensor_max_height = paramters->camera_height,
-                .sensor_fps = paramters->fps,
-            },
-            .isp = {
-                .mp_enable = true,
-                .mp_width = paramters->isp_output_width,
-                .mp_height = paramters->isp_output_height,
-                .mp_format = BK_PIXEL_FORMAT_NV12,
-                .sp_enable = false,
-                .mp_flexa = true,
-            },
-        };
+        camera_board_config_t camera_config = {0};
         if (app_camera_board_config_get() != NULL) {
-            camera_config.mipi.hmirror = app_camera_board_config_get()->mipi.hmirror;
-            camera_config.mipi.vflip = app_camera_board_config_get()->mipi.vflip;
+            os_memcpy(&camera_config, app_camera_board_config_get(), sizeof(camera_board_config_t));
         }
+        camera_config.mipi.enable = true;
+        camera_config.mipi.sensor_max_width = paramters->camera_width;
+        camera_config.mipi.sensor_max_height = paramters->camera_height;
+        camera_config.mipi.sensor_fps = paramters->fps;
+        camera_config.isp.mp_enable = true;
+        camera_config.isp.mp_width = paramters->isp_output_width;
+        camera_config.isp.mp_height = paramters->isp_output_height;
+        camera_config.isp.mp_format = BK_PIXEL_FORMAT_NV12;
+        camera_config.isp.sp_enable = false;
+        camera_config.isp.mp_flexa = true;
 
         app_camera_board_config_set(&camera_config);
 
@@ -426,20 +411,15 @@ void cli_avdk_mds_display_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc
 
         if (selected_panel != NULL)
         {
-            display_board_config_t display_config = {
-                .mipi = {
-                    .enable = true,
-                    .pin_reset = GPIO_60,
-                    .pin_backlight = GPIO_7,
-                    .panel = selected_panel,
-                },
-
-                .dpu_video = {
-                    .enable = true,
-                    .decompress = true,
-                    .format = BK_PIXEL_FORMAT_ARGB8888,
-                },
-            };
+            display_board_config_t display_config = {0};
+            if (app_display_board_config_get() != NULL) {
+                os_memcpy(&display_config, app_display_board_config_get(), sizeof(display_board_config_t));
+            }
+            display_config.mipi.enable = true;
+            display_config.mipi.panel = selected_panel;
+            display_config.dpu_video.enable = true;
+            display_config.dpu_video.decompress = true;
+            display_config.dpu_video.format = BK_PIXEL_FORMAT_ARGB8888;
             app_display_board_config_set(&display_config);
         }
         
@@ -595,11 +575,13 @@ void test_hdma(void)
 static void joint_test_mipi_lcd_on(void)
 {
     display_board_config_t display_board = {0};
-
+    if (app_display_board_config_get() != NULL) {
+        os_memcpy(&display_board, app_display_board_config_get(), sizeof(display_board_config_t));
+    }
     display_board.mipi.enable = true;
-    display_board.mipi.pin_reset = GPIO_60;
-    display_board.mipi.pin_backlight = GPIO_7;
-    display_board.mipi.panel = &lcd_device_hx8399c_mipi_1080x1920;
+    if (display_board.mipi.panel == NULL) {
+        display_board.mipi.panel = &lcd_device_hx8399c_mipi_1080x1920;
+    }
     display_board.dpu_video.enable = true;
     display_board.dpu_video.decompress = true;
     display_board.dpu_video.format = BK_PIXEL_FORMAT_ARGB8888;
@@ -607,7 +589,7 @@ static void joint_test_mipi_lcd_on(void)
     app_mipi_lcd_turn_on(app_display_board_config_get());
 }
 
-/// @brief joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [h264e]
+/// @brief joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [width height] [h264e]
 /// @param pcWriteBuffer 
 /// @param xWriteBufferLen 
 /// @param argc 
@@ -661,12 +643,6 @@ void cli_avdk_mds_joint_test_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
             joint_test_mipi_lcd_on();
 
             camera_board.mipi.enable = true;
-            camera_board.mipi.pin_scl = GPIO_69;
-            camera_board.mipi.pin_sda = GPIO_70;
-            camera_board.mipi.i2c_id = 1;
-            camera_board.mipi.pin_reset = GPIO_71;
-            camera_board.mipi.pin_pwdn = -1;
-            camera_board.mipi.pin_xclk = GPIO_59;
             if (use_1080p) {
                 camera_board.mipi.sensor_max_width = 1920;
                 camera_board.mipi.sensor_max_height = 1080;
@@ -773,19 +749,37 @@ void cli_avdk_mds_joint_test_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
         if (argc >= 3 && argv[2] != NULL && os_strcmp(argv[2], "uvc") == 0) {
 #ifdef CONFIG_USB_CAMERA
             bool want_h264e = false;
-            if (argc >= 4) {
-                if (argv[3] == NULL || os_strcmp(argv[3], "h264e") != 0) {
-                    LOGE("Usage: joint_test open uvc [h264e]\n");
+            uint16_t width = 1280;
+            uint16_t height = 720;
+            int arg_idx = 3;
+
+            if (argc > arg_idx + 1 && argv[arg_idx] != NULL && argv[arg_idx + 1] != NULL &&
+                os_strcmp(argv[arg_idx], "h264e") != 0) {
+                width = (uint16_t)os_strtoul(argv[arg_idx], NULL, 10);
+                height = (uint16_t)os_strtoul(argv[arg_idx + 1], NULL, 10);
+                if (width == 0 || height == 0) {
+                    LOGE("Usage: joint_test open uvc [width height] [h264e]\n");
                     return;
                 }
-                want_h264e = true;
+                arg_idx += 2;
+            }
+
+            for (int i = arg_idx; i < argc; ++i) {
+                if (argv[i] == NULL) {
+                    continue;
+                }
+                if (os_strcmp(argv[i], "h264e") == 0) {
+                    want_h264e = true;
+                    continue;
+                }
+                LOGE("Usage: joint_test open uvc [width height] [h264e]\n");
+                return;
             }
 
             joint_test_mipi_lcd_on();
 
             bk_jpeg_decode_ctlr_handle_t decode_handle = NULL;
-            uint16_t width = 1280;
-            uint16_t height = 720;
+            LOGI("joint_test open uvc %ux%u h264e=%d\n", width, height, want_h264e);
             camera_parameters_ext_t ext_parameters = {
                 .camera_width = width,
                 .camera_height = height,
@@ -828,7 +822,7 @@ void cli_avdk_mds_joint_test_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
                     return;
                 }
             }
-            /* app_gpu_v2_turn_on 从全局 gpu_board 读旋转/缩放；MIPI 残留 1920x1080+scale 与 720p UVC 不一致，按 ap_main 720p+LCD 重新写入 */
+            /* app_gpu_v2_turn_on 从全局 gpu_board 读旋转/缩放；MIPI 残留 1920x1080+scale 与 UVC 分辨率不一致，按当前 UVC 分辨率+LCD 重新写入 */
             {
                 gpu_board_config_t gpu_board_uvc = {0};
                 gpu_board_uvc.flexa.enable = true;
@@ -840,7 +834,7 @@ void cli_avdk_mds_joint_test_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
                 gpu_board_uvc.flexa.src_format = BK_PIXEL_FORMAT_NV12;
                 gpu_board_uvc.flexa.dst_format = BK_PIXEL_FORMAT_ARGB8888;
                 gpu_board_uvc.flexa.dst_compress = true;
-                gpu_board_uvc.flexa.scale = true;
+                gpu_board_uvc.flexa.scale = (width != 1920 || height != 1080);
                 gpu_board_uvc.flexa.tess_width = 0;
                 gpu_board_uvc.flexa.tess_height = 0;
                 app_gpu_board_config_set(&gpu_board_uvc);
@@ -867,7 +861,7 @@ void cli_avdk_mds_joint_test_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
 #endif
             return;
         }
-        LOGE("Usage: joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [h264e]\n");
+        LOGE("Usage: joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [width height] [h264e]\n");
         return;
     }
     if (argc >= 2 && argv[1] != NULL && os_strcmp(argv[1], "close") == 0)
@@ -960,7 +954,7 @@ void cli_avdk_mds_joint_test_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
         test_hdma();
         return;
     }
-    LOGE("Usage: joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [h264e] | test | close uvc|mipi\n");
+    LOGE("Usage: joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [width height] [h264e] | test | close uvc|mipi\n");
 }
 
 
@@ -1301,7 +1295,7 @@ static const struct cli_command s_devices_cli_commands[] =
 {
     {"isp", "isp...", cli_avdk_mds_isp_cmd},
     {"display", "display...", cli_avdk_mds_display_cmd},
-    {"joint_test", "joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [h264e] | test | close uvc|mipi", cli_avdk_mds_joint_test_cmd},
+    {"joint_test", "joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [width height] [h264e] | test | close uvc|mipi", cli_avdk_mds_joint_test_cmd},
     {"uvc", "uvc...", cli_avdk_mds_uvc_cmd},
     {"doorbell", "doorbell...", cli_avdk_mds_cmd},
     {"audio", "audio...", cli_avdk_mds_audio_cmd},
