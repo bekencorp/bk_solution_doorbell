@@ -7,6 +7,7 @@
 This project is the **IPC network camera firmware** in the doorbell solution, based on BK7259 SMP.
 It reuses the `smart_lock` doorbell stack (BLE provisioning, TCP/UDP streaming, full-duplex audio, ASR),
 but **does not bring up the LCD/GPU display pipeline by default** — targeting headless IPC / network camera products.
+It now also enables AP-powerdown low-power keepalive by reusing the `doorbell_lp` keepalive path.
 
 ### 1.1 vs doorbell
 
@@ -17,8 +18,9 @@ but **does not bring up the LCD/GPU display pipeline by default** — targeting 
 | LCD / GPU / DPU | enabled in ap_main | not configured in ap_main (LCD/GPU drivers remain in defconfig) |
 | AT commands | port 5 | port 5, WiFi/MISC AT |
 | ASR | auto-start | auto-start |
-| UVC | defconfig enabled | defconfig enabled (ap_main configures MIPI only) |
+| UVC | defconfig enabled | disabled in defconfig (ap_main configures MIPI only) |
 | CS2 P2P | enabled | not enabled (CS2 buffer config retained) |
+| Low-power keepalive | supported by doorbell_lp | enabled for headless IPC |
 
 ## 2 Features
 
@@ -31,6 +33,7 @@ but **does not bring up the LCD/GPU display pipeline by default** — targeting 
 | Audio | ADK + AEC v3 + G.711/G.722, on-board Mic/Speaker, UVC UAC |
 | ASR | KWS + TFLite-Micro + NPU (SRAM mode, `CONFIG_ASR_SERVICE_USE_SRAM`) |
 | AT | port 5, `CONFIG_WIFI_AT_ENABLE` / `CONFIG_MISC_AT_ENABLE` |
+| Low-power keepalive | AP powers down after multimedia idle; CP keeps TCP keepalive and uses RTC wakeups to monitor server responses |
 
 ### 2.1 Default board config
 
@@ -112,6 +115,7 @@ Same as doorbell, using BekenIot APK:
 2. BLE provisioning (2.4G Wi-Fi)
 3. H.264 stream starts automatically after provisioning
 4. Toggle audio from APK (no LCD button)
+5. Turn off streaming/audio and wait for the idle check; the device enters CP keepalive low-power state and wakes AP on server wakeup or keepalive failure
 
 ### 4.3 Use cases
 
@@ -130,6 +134,10 @@ projects/ipc
 │   └── config/bk7259_ap/defconfig
 ├── cp/
 │   ├── cp_main.c
+│   ├── db_ipc_msg/                # AP/CP keepalive command channel
+│   ├── db_pack/                   # CP keepalive TCP packet framing
+│   ├── keepalive/                 # CP-side low-power keepalive
+│   ├── powerctrl/                 # AP power control and low-voltage sleep
 │   └── config/bk7259/defconfig
 ├── partitions/bk7259/
 ├── CMakeLists.txt
@@ -148,7 +156,9 @@ projects/ipc
 | `CONFIG_CS2_P2P_SERVER` | n | y |
 | `CONFIG_ASR_SERVICE_USE_SRAM` | y | n |
 | `CONFIG_AT` / `CONFIG_WIFI_AT_ENABLE` | y | y |
-| `CONFIG_MDS_SNAPSHOT` | n | y |
+| `CONFIG_NTWK_CLIENT_SERVICE_ENABLE` | y | y (doorbell_lp) |
+| `CONFIG_PM_ONLY_CP_ENABLE` | y (CP) | y (doorbell_lp CP) |
+| `CONFIG_MDS_SNAPSHOT` | y | y |
 
 Shared components: `../../components/`.
 

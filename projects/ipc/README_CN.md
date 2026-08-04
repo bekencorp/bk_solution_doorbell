@@ -6,7 +6,7 @@
 
 本工程是 doorbell 解决方案中的 **IPC 网络摄像头方案**，基于 BK7259 SMP 双核架构。
 与 `doorbell` 共用 `smart_lock` 门铃业务栈（BLE 配网、TCP/UDP 图传、双向音频、ASR），但 **默认不启用 LCD/GPU 显示链路**，
-面向无屏 IPC / 网络摄像头产品。
+面向无屏 IPC / 网络摄像头产品。当前工程已参考 `doorbell_lp` 启用 AP powerdown 低功耗保活能力。
 
 ### 1.1 与 doorbell 的定位差异
 
@@ -17,8 +17,9 @@
 | LCD / GPU / DPU | ap_main 启用 | ap_main 未配置（defconfig 保留 LCD/GPU 驱动选项） |
 | AT 命令 | 启用（port 5） | 启用（port 5，WiFi/MISC AT） |
 | ASR | 自动启动 | 自动启动 |
-| UVC | defconfig 启用 | defconfig 启用（ap_main 仅配 MIPI） |
+| UVC | defconfig 启用 | defconfig 关闭（ap_main 仅配 MIPI） |
 | CS2 P2P | 启用 | 未启用（仅保留 CS2 buffer 配置） |
+| 低功耗保活 | doorbell_lp 支持 | 已启用（无屏 IPC 版本） |
 
 ## 2 主要功能
 
@@ -31,6 +32,7 @@
 | 语音 | ADK + AEC v3 + G.711/G.722，板载 Mic/Speaker，UVC UAC |
 | ASR | KWS + TFLite-Micro + NPU（SRAM 模式，`CONFIG_ASR_SERVICE_USE_SRAM`） |
 | AT | 默认端口 5，支持 `CONFIG_WIFI_AT_ENABLE`、`CONFIG_MISC_AT_ENABLE` |
+| 低功耗保活 | 多媒体空闲后停止 AP 侧业务，CP 侧保持 TCP keepalive，RTC 周期唤醒检测服务端响应 |
 
 ### 2.1 默认板级硬件配置
 
@@ -112,6 +114,7 @@ projects/ipc/build/bk7259/ipc/package/all-app.bin
 2. BLE 配网（2.4G Wi-Fi）
 3. 配网成功后自动开启 H.264 图传
 4. 通过 APK 控制音频开关（无 LCD 按钮）
+5. 关闭图传/音频等多媒体业务并等待空闲检测后，设备进入 CP 保活低功耗状态；服务端唤醒或保活异常时恢复 AP 业务
 
 ### 4.3 适用场景
 
@@ -130,6 +133,10 @@ projects/ipc
 │   └── config/bk7259_ap/defconfig
 ├── cp/
 │   ├── cp_main.c
+│   ├── db_ipc_msg/                # AP/CP 保活命令通道
+│   ├── db_pack/                   # CP keepalive TCP 包封装
+│   ├── keepalive/                 # CP 侧低功耗保活
+│   ├── powerctrl/                 # AP 上下电和低压睡眠控制
 │   └── config/bk7259/defconfig
 ├── partitions/bk7259/
 ├── CMakeLists.txt
@@ -148,7 +155,9 @@ projects/ipc
 | `CONFIG_CS2_P2P_SERVER` | n | y |
 | `CONFIG_ASR_SERVICE_USE_SRAM` | y | n |
 | `CONFIG_AT` / `CONFIG_WIFI_AT_ENABLE` | y | y |
-| `CONFIG_MDS_SNAPSHOT` | n | y |
+| `CONFIG_NTWK_CLIENT_SERVICE_ENABLE` | y | y（doorbell_lp） |
+| `CONFIG_PM_ONLY_CP_ENABLE` | y（CP） | y（doorbell_lp CP） |
+| `CONFIG_MDS_SNAPSHOT` | y | y |
 
 公共组件路径：`../../components/`。
 

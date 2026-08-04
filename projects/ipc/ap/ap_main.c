@@ -16,6 +16,8 @@
 #include "doorbell_comm.h"
 #include "bk_smart_config.h"
 #endif
+#include "doorbell_ipc_msg.h"
+#include "doorbell_keepalive.h"
 
 int main(void)
 {
@@ -70,6 +72,10 @@ int main(void)
     int cli_voice_init(void);
     cli_voice_init();
 #endif
+
+    doorbell_ipc_wakeup_env_init();
+    doorbell_keepalive_handle_wakeup_reason();
+    //doorbell_keepalive_cli_init();
 
     return 0;
 }
