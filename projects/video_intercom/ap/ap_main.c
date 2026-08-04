@@ -67,8 +67,6 @@ int main(void)
     bk_init();
     media_service_init();
 
-    BK_LOGI(NULL, "AP main running...\r\n");
-
     camera_board_config_t camera_board = {0};
     display_board_config_t display_board = {0};
     gpu_board_config_t gpu_board = {0};
