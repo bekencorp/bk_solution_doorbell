@@ -1,5 +1,7 @@
 # Doorbell 解决方案（BK7259）
 
+* [English](./README.md)
+
 ## 概述
 
 BK7259 SMP 门铃方案，包含可视门铃、低功耗保活门铃、无屏 IPC 及 ISP/H264E 联调工程。

@@ -1,5 +1,7 @@
 # Doorbell Solution (BK7259)
 
+* [中文](./README_CN.md)
+
 ## Overview
 
 BK7259 SMP doorbell solution: video doorbell, low-power keepalive, headless IPC, and ISP/H264E tuning projects.
