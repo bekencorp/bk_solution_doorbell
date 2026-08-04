@@ -743,6 +743,10 @@ bk_err_t db_keepalive_cp_deinit(void)
     s_keepalive_env.keepalive_ongoing = false;
     s_keepalive_env.cleanup_requested = true;
 
+    /*Resolve BUG BK7259SW-2372, after stop keepalive,
+     * the cif filter is not removed, so add this line to remove the cif filter.
+    */
+    cif_filter_add_customer_filter(0, 0);
     // Stop RTC timer
     db_keepalive_stop_keepalive_rtc();
 
