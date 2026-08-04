@@ -35,16 +35,10 @@ int main(void)
     gpu_board_config_t gpu_board = {0};
 
     camera_board.mipi.enable = true;
-    /* BK7259QN128B832 (B package): pins P69/P70/P71 (GPIO69/70/71) are no
-     * longer bonded out (those pads became audio/power pins). Camera I2C1 and
-     * reset are remapped to GPIOs that exist in the B package. GPIO_64/GPIO_65
-     * are the free digital pads adjacent to the camera connector cluster
-     * (B pins 118/119); reset moves to GPIO_55 (nearest free digital pad).
-     * Adjust these to match the actual B-package board schematic if different. */
     camera_board.mipi.pin_scl = GPIO_64;
     camera_board.mipi.pin_sda = GPIO_65;
     camera_board.mipi.i2c_id = 1;
-    camera_board.mipi.pin_reset = GPIO_55;
+    camera_board.mipi.pin_reset = GPIO_60;
     camera_board.mipi.pin_pwdn = -1;
     camera_board.mipi.pin_xclk = GPIO_59;
     camera_board.mipi.sensor_max_width = 1920;
