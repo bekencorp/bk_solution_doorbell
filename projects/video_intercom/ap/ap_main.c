@@ -48,6 +48,8 @@ int main(void)
      * throughput so the concurrent uplink-encode + downlink-decode + GPU
      * composite (+ PIP) pipeline has more per-frame budget for validation. */
     camera_board.mipi.sensor_fps = 15;
+    camera_board.mipi.hmirror = 0;
+    camera_board.mipi.vflip = 0;
     camera_board.isp.mp_enable = true;
     camera_board.isp.mp_flexa = true;
     /* Uplink encode source = ISP MP. 1280x720 (16:9, 1.5x downscale of 1080p

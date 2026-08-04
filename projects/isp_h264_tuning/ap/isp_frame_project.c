@@ -53,6 +53,8 @@ static void isp_frame_project_fill_camera_config(camera_board_config_t *config,
     config->isp.mp_height = cap->isp_h;
 
     config->mipi.sensor_fps = fps ? fps : 20;
+    config->mipi.hmirror = 0;
+    config->mipi.vflip = 0;
     config->isp.mp_enable = true;
     /* frame mode (flexa off): required for app_isp_camera_channel_read used by preview */
     config->isp.mp_flexa = false;

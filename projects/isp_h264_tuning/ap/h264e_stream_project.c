@@ -136,6 +136,8 @@ static void h264e_stream_project_fill_camera_config(camera_board_config_t *confi
     config->isp.mp_height = height;
 
     config->mipi.sensor_fps = fps ? fps : 20;
+    config->mipi.hmirror = 0;
+    config->mipi.vflip = 0;
     config->isp.mp_enable = true;
     config->isp.mp_flexa = true;
     config->isp.mp_format = BK_PIXEL_FORMAT_NV12;

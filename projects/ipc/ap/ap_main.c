@@ -38,6 +38,8 @@ int main(void)
     camera_board.mipi.sensor_max_width = 2304;
     camera_board.mipi.sensor_max_height = 1296;
     camera_board.mipi.sensor_fps = 20;
+    camera_board.mipi.hmirror = 0;
+    camera_board.mipi.vflip = 0;
     camera_board.isp.mp_enable = true;
     camera_board.isp.mp_flexa = true;
     camera_board.isp.mp_width = 2304;
