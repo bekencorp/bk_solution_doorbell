@@ -19,6 +19,8 @@ typedef struct
         uint16_t sensor_max_width;
         uint16_t sensor_max_height;
         uint8_t sensor_fps;
+        uint8_t hmirror; /**< Horizontal mirror: 0=off, 1=on */
+        uint8_t vflip;   /**< Vertical flip: 0=off, 1=on */
     } mipi;
 
     struct {
@@ -32,6 +34,8 @@ typedef struct
         uint16_t sensor_max_width;
         uint16_t sensor_max_height;
         uint8_t sensor_fps;
+        uint8_t hmirror; /**< Horizontal mirror: 0=off, 1=on */
+        uint8_t vflip;   /**< Vertical flip: 0=off, 1=on */
     } dvp;
 
     struct {

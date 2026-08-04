@@ -210,6 +210,10 @@ void cli_avdk_mds_isp_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, ch
                 .mp_flexa = true,
             },
         };
+        if (app_camera_board_config_get() != NULL) {
+            camera_config.mipi.hmirror = app_camera_board_config_get()->mipi.hmirror;
+            camera_config.mipi.vflip = app_camera_board_config_get()->mipi.vflip;
+        }
 
         app_camera_board_config_set(&camera_config);
 
@@ -622,6 +626,9 @@ void cli_avdk_mds_joint_test_cmd(char *pcWriteBuffer, int xWriteBufferLen, int a
             bool use_1080p = false;
             uint16_t sensor_fps = 25;
             camera_board_config_t camera_board = {0};
+            if (app_camera_board_config_get() != NULL) {
+                os_memcpy(&camera_board, app_camera_board_config_get(), sizeof(camera_board_config_t));
+            }
             gpu_board_config_t gpu_board = {0};
 
             for (int i = 3; i < argc; ++i) {

@@ -52,6 +52,30 @@ static camera_board_config_t *camera_board_config = NULL;
  */
 static bool s_isp_camera_read_used = false;
 
+static avdk_err_t app_isp_sensor_apply_mirror(bk_camera_sensor_handle_t handle, bool hmirror, bool vflip)
+{
+    avdk_err_t ret;
+
+    if (handle == NULL)
+    {
+        return AVDK_ERR_INVAL;
+    }
+
+    ret = bk_camera_sensor_set_hmirror(handle, hmirror);
+    if (ret != AVDK_ERR_OK && ret != AVDK_ERR_UNSUPPORTED)
+    {
+        return ret;
+    }
+
+    ret = bk_camera_sensor_set_vflip(handle, vflip);
+    if (ret != AVDK_ERR_OK && ret != AVDK_ERR_UNSUPPORTED)
+    {
+        return ret;
+    }
+
+    return AVDK_ERR_OK;
+}
+
 /**
  * @brief Vote MIPI camera AuxLDOs (1.8V iovdd + 1.2V dvdd) on/off.
  *
@@ -295,6 +319,20 @@ int app_isp_dvp_camera_turn_on(camera_parameters_ext_t *paramters)
     };
     bk_camera_sensor_set_format(isp_cam_handle.sensor_handle, &format);
 
+    if (camera_board_config != NULL)
+    {
+        ret = app_isp_sensor_apply_mirror(isp_cam_handle.sensor_handle,
+                                          camera_board_config->dvp.hmirror != 0,
+                                          camera_board_config->dvp.vflip != 0);
+        if (ret != AVDK_ERR_OK)
+        {
+            LOGE("%s, apply mirror failed: %d\n", __func__, ret);
+            return ret;
+        }
+        LOGI("%s hmirror=%u vflip=%u\n", __func__,
+             camera_board_config->dvp.hmirror, camera_board_config->dvp.vflip);
+    }
+
     if (ret != AVDK_ERR_OK)
     {
         LOGE("%s, %d, bk_isp_camera_open failed ret: %d\n", __func__, __LINE__, ret);
@@ -395,6 +433,8 @@ err:
 
 int app_isp_mipi_sensor_start(const camera_board_config_t *config)
 {
+    avdk_err_t ret;
+
     // step 5: enable sensor
     bk_camera_sensor_init(isp_cam_handle.sensor_handle);
     bk_camera_sensor_format_t format = {
@@ -403,7 +443,23 @@ int app_isp_mipi_sensor_start(const camera_board_config_t *config)
         .fps = config->mipi.sensor_fps,
     };
 
-    return bk_camera_sensor_set_format(isp_cam_handle.sensor_handle, &format);
+    ret = bk_camera_sensor_set_format(isp_cam_handle.sensor_handle, &format);
+    if (ret != AVDK_ERR_OK)
+    {
+        return ret;
+    }
+
+    ret = app_isp_sensor_apply_mirror(isp_cam_handle.sensor_handle,
+                                      config->mipi.hmirror != 0,
+                                      config->mipi.vflip != 0);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("%s, apply mirror failed: %d\n", __func__, ret);
+        return ret;
+    }
+
+    LOGI("%s hmirror=%u vflip=%u\n", __func__, config->mipi.hmirror, config->mipi.vflip);
+    return AVDK_ERR_OK;
 }
 
 int app_isp_mipi_camera_mp_turn_on(const camera_board_config_t *config, bk_isp_camera_ctlr_config_t *isp_ctlr_config)
@@ -622,6 +678,16 @@ int app_isp_dual_camera_turn_on(camera_parameters_ext_t *paramters)
     bk_camera_sensor_init(isp_cam_handle.mipi_sensor_handle);
     bk_camera_sensor_set_format(isp_cam_handle.mipi_sensor_handle, &mipi_format);
 
+    if (camera_board_config != NULL)
+    {
+        app_isp_sensor_apply_mirror(isp_cam_handle.dvp_sensor_handle,
+                                    camera_board_config->dvp.hmirror != 0,
+                                    camera_board_config->dvp.vflip != 0);
+        app_isp_sensor_apply_mirror(isp_cam_handle.mipi_sensor_handle,
+                                    camera_board_config->mipi.hmirror != 0,
+                                    camera_board_config->mipi.vflip != 0);
+    }
+
     if (ret != AVDK_ERR_OK)
     {
         LOGE("%s, %d, bk_isp_camera_open failed ret: %d\n", __func__, __LINE__, ret);
@@ -652,6 +718,12 @@ int app_isp_dual_dvp_on(camera_parameters_ext_t *paramters)
     AVDK_RETURN_ON_ERROR(app_mipi_camera_power_enable(true), TAG, "app_mipi_camera_power_enable failed");
     bk_camera_sensor_init(isp_cam_handle.dvp_sensor_handle);
     bk_camera_sensor_set_format(isp_cam_handle.dvp_sensor_handle, &dvp_format);
+    if (camera_board_config != NULL)
+    {
+        return app_isp_sensor_apply_mirror(isp_cam_handle.dvp_sensor_handle,
+                                           camera_board_config->dvp.hmirror != 0,
+                                           camera_board_config->dvp.vflip != 0);
+    }
     return AVDK_ERR_OK;
 }
 
