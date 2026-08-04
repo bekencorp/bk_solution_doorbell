@@ -48,6 +48,30 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
                                    uint8_t *flexa_ring,
                                    uint8_t flexa_buf_count);
 
+/**
+ * @brief Enable the PIP self-view overlay on an already-running compositor.
+ *
+ * For the case where the compositor was started with pip_enable=false (the
+ * local camera/ISP SP was not yet available). Starts the ISP SP capture + blit
+ * overlay using the pip_* fields of @p cfg. No-op if PIP is already enabled.
+ *
+ * @param cfg  Config whose pip_* fields describe the overlay geometry.
+ * @return BK_OK on success.
+ */
+bk_err_t doorbell_compositor_pip_enable(const doorbell_compositor_config_t *cfg);
+
+/**
+ * @brief Disable the PIP self-view overlay on a still-running compositor.
+ *
+ * Stops the ISP SP capture/blit task and clears the GPU blit overlay so the
+ * small self-view window disappears (instead of freezing on the last SP frame)
+ * while the main downlink picture keeps being composited. Used when the local
+ * uplink/camera is turned off during a call. No-op if PIP is already off.
+ *
+ * @return BK_OK on success (or already off); BK_ERR_STATE if compositor is down.
+ */
+bk_err_t doorbell_compositor_pip_disable(void);
+
 /** @brief Stop the compositor (PIP overlay + GPU). Safe if not running. */
 void doorbell_compositor_stop(void);
 

@@ -22,7 +22,17 @@
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
 
 #define COMP_GPU_FLEXA_LINES     16U
-#define COMP_FRAME_POOL_COUNT    2U
+/* The SDK GPU flex worker allocates the NEXT render target (frame_malloc) BEFORE
+ * it flushes the just-finished frame to the DPU (see gpu_flex_data_frame_done in
+ * bk_gpu_ctlr_default.c). So the pipeline holds up to 3 output frames at once:
+ * 1 the GPU is rendering into + up to COMP_DISPLAY_PRIME_COUNT (2) still queued
+ * at the DPU. So the peak is 3 concurrent output frames. With only 2 pool
+ * buffers the 3rd came from a runtime malloc, which fails once the PIP self-view
+ * pool has eaten the last MEM_SLAB_HEAP_UNCODED headroom -> frame_malloc returns
+ * NULL, the worker keeps the same render buffer, never calls frame_done, and the
+ * display freezes at 0fps. Reserving all 3 up front (at downlink start, when the
+ * heap is emptiest) makes steady-state allocation never touch malloc. */
+#define COMP_FRAME_POOL_COUNT    3U
 #define COMP_DISPLAY_PRIME_COUNT 2U
 #define COMP_DISPLAY_WAIT_MS     100U
 
@@ -58,6 +68,8 @@ typedef struct
 
     /* PIP overlay (ISP SP self-view). */
     bool pip_enable;
+    volatile uint8_t pip_stop;   /* runtime request to stop the PIP task while the
+                                  * main compositor keeps running (uplink/camera off) */
     uint16_t pip_w;
     uint16_t pip_h;
     uint16_t pip_dst_x;
@@ -78,7 +90,7 @@ static comp_ctx_t s_comp = {0};
 /* GPU output frame pool                                              */
 /* ------------------------------------------------------------------ */
 
-static void *comp_out_alloc(uint32_t size)
+static void *comp_out_try_pool(uint32_t size)
 {
     void *ptr = NULL;
     uint32_t flags;
@@ -98,7 +110,19 @@ static void *comp_out_alloc(uint32_t size)
         }
     }
     rtos_exit_critical(flags);
+    return ptr;
+}
 
+static void *comp_out_alloc(uint32_t size)
+{
+    void *ptr = comp_out_try_pool(size);
+
+    /* Rejected earlier attempt: block-waiting here for a pool buffer deadlocks at
+     * pool<3 because the SDK worker allocs the next render target BEFORE flushing
+     * (which is what would free a buffer). With COMP_FRAME_POOL_COUNT covering the
+     * peak-3 need, the pool always has a free buffer in steady state, so this just
+     * falls through to the pool. malloc stays as a transient safety net; a single
+     * NULL only skips one GPU frame and self-heals once the DPU releases. */
     if (ptr == NULL)
     {
         ptr = bk_frame_buffer_malloc(MEM_SLAB_HEAP_UNCODED, size);
@@ -347,7 +371,7 @@ static void comp_pip_task_entry(void *arg)
          (unsigned)s_comp.pip_dst_x, (unsigned)s_comp.pip_dst_y,
          (unsigned)s_comp.pip_rotate, (unsigned)s_comp.pip_frame_size);
 
-    while (s_comp.running != 0U)
+    while (s_comp.running != 0U && s_comp.pip_stop == 0U)
     {
         uint8_t *frame_buf;
         bk_gpu_blit_config_t blit;
@@ -460,6 +484,8 @@ static avdk_err_t comp_pip_start(void)
         return ret;
     }
 
+    s_comp.pip_stop = 0U;
+
     /* Open the ISP SP channel (sync at MP mid-frame) that feeds the self-view. */
     if (doorbell_isp_sp_open(s_comp.pip_w, s_comp.pip_h) != BK_OK)
     {
@@ -560,8 +586,14 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
     }
     s_comp.display_pushed = 0U;
 
+    /* The GPU compressed-ARGB output allocates height rounded up to 16 lines
+     * (mirrors h264d_gpu_display_gpu_blit.c OUTPUT_HEIGHT). The pool buffer size
+     * MUST use the same aligned height, otherwise comp_out_alloc's size match
+     * never hits, the pre-allocated pool is dead weight, and every GPU frame is
+     * malloc'd fresh from MEM_SLAB_HEAP_UNCODED - which exhausts that heap once
+     * the PIP self-view pool is also live and freezes the whole compositor. */
     pool_buf_size = (uint32_t)bk_pixel_size_get(BK_PIXEL_FORMAT_ARGB8888) *
-                    ((uint32_t)dst_w / 4U) * (uint32_t)dst_h;
+                    ((uint32_t)dst_w / 4U) * (((uint32_t)dst_h + 15U) & ~15U);
     ret = comp_out_pool_init(pool_buf_size);
     if (ret != AVDK_ERR_OK)
     {
@@ -651,6 +683,66 @@ fail_sem:
     }
     s_comp.running = 0U;
     return BK_FAIL;
+}
+
+bk_err_t doorbell_compositor_pip_enable(const doorbell_compositor_config_t *cfg)
+{
+    if (cfg == NULL)
+    {
+        return BK_ERR_PARAM;
+    }
+    if (s_comp.gpu == NULL || s_comp.running == 0U)
+    {
+        return BK_ERR_STATE;
+    }
+    if (s_comp.pip_enable)
+    {
+        return BK_OK; /* already showing the self-view */
+    }
+    if (!cfg->pip_enable)
+    {
+        return BK_ERR_STATE;
+    }
+
+    s_comp.pip_w = cfg->pip_width;
+    s_comp.pip_h = cfg->pip_height;
+    s_comp.pip_dst_x = cfg->pip_dst_x;
+    s_comp.pip_dst_y = cfg->pip_dst_y;
+    s_comp.pip_rotate = cfg->pip_rotate;
+
+    if (comp_pip_start() != AVDK_ERR_OK)
+    {
+        LOGW("runtime pip start failed, main picture continues without PIP\n");
+        return BK_FAIL;
+    }
+    s_comp.pip_enable = true;
+    LOGI("runtime PIP enabled: %ux%u dst=(%u,%u) rot=%u\n",
+         (unsigned)s_comp.pip_w, (unsigned)s_comp.pip_h,
+         (unsigned)s_comp.pip_dst_x, (unsigned)s_comp.pip_dst_y,
+         (unsigned)s_comp.pip_rotate);
+    return BK_OK;
+}
+
+bk_err_t doorbell_compositor_pip_disable(void)
+{
+    if (s_comp.gpu == NULL || s_comp.running == 0U)
+    {
+        return BK_ERR_STATE;
+    }
+    if (!s_comp.pip_enable)
+    {
+        return BK_OK; /* self-view already off */
+    }
+
+    /* Signal the PIP task to exit (the main compositor keeps running), then reuse
+     * comp_pip_stop which joins the task, closes the ISP SP channel and clears the
+     * GPU blit overlay so the small self-view window disappears on the next
+     * composed frame instead of freezing on the last SP frame. */
+    s_comp.pip_stop = 1U;
+    comp_pip_stop();
+    s_comp.pip_enable = false;
+    LOGI("runtime PIP disabled (uplink/camera off)\n");
+    return BK_OK;
 }
 
 void doorbell_compositor_stop(void)

@@ -14,6 +14,7 @@
 #include "doorbell_downlink_img_manager.h"
 #include "doorbell_display_compositor.h"
 #include "doorbell_downlink_video.h"
+#include "doorbell_jsonrpc.h"
 #if CONFIG_SMART_INTERCOM_DL_ZEROCOPY
 #include "network_transfer.h"
 #endif
@@ -24,51 +25,59 @@
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
 
 #define DL_SEG_HEIGHT_MB     1U
-/* h264d -> GPU FLEXA ring depth (in 16-line macroblock-row segments).
- *
- * ring size = width * (16 * DL_SEG_HEIGHT_MB * DL_SEG_NUM) * 3/2.
- * The ring is hsram_malloc'd BEFORE the compositor GPU's 128KB (0x20000)
- * contiguous buffer (also hsram), and the 720P uplink (ISP MP + H264 encode)
- * runs concurrently, so HSRAM is tight. At the reduced 640x360 uplink/downlink
- * size a 4-segment ring is only 640*64*3/2 = 60KB, leaving a contiguous 128KB
- * hole for the GPU. 4 segments matches the reference h264d_gpu_display and is
- * deep enough that the decode->GPU handoff does not starve under the concurrent
- * compositor scale/rotate + PIP overlay blit (2 segments stalled immediately
- * once the PIP blit was added). */
-/* Seams are decode->GPU FLEXA ring-wrap artifacts: the ring holds DL_SEG_NUM
- * 16-line rows, so a frame taller than DL_SEG_NUM*16 wraps mid-picture and the
- * GPU reads partially-overwritten slots (period = DL_SEG_NUM MB-rows: 4->4
- * lines, 6->3 lines; pushing to 15 while the frame is 18 rows tipped the main
- * FLEXA read into all-zero/green output). A FULL-FRAME ring (DL_SEG_NUM ==
- * frame height / 16) has no intra-frame wrap and is deterministically seam-free.
- * At 512x288 the frame is 18 rows; a full-frame ring (18 seg, ~221KB) is
- * seam-free but does NOT fit HSRAM (GPU 128KB composite + uplink encode + PIP
- * are concurrent), so a shallow 4-segment ring (~48KB) is used here. That may
- * reintroduce mid-picture ring-wrap seams; the seam-free HSRAM-safe sweet spot
- * was 256x144 (9 seg = full frame, ~55KB). The decoder also rejects
- * segment_number > frame blocks. */
-/* At the 256x144 downlink size the frame is 9 x 16-line rows, so DL_SEG_NUM=9
- * makes the FLEXA ring a FULL frame (~55KB): no mid-picture wrap, the h264d->GPU
- * bond never reads a partially-overwritten slot, and the hardware decoder stops
- * raising VCDEC_DEC_INT_ERROR. (512x288 = 18 rows would need 18 seg / ~221KB
- * which does not fit HSRAM; that is why the larger size was unstable.) */
-#define DL_SEG_NUM           9U
-#define DL_SLOT_COUNT        3U
+/* Shallow FLEXA ring depth for downlink frames whose full-frame ring would
+ * exceed the HSRAM budget (~128KB alongside the GPU composite buffer).
+ * Matches h264d_gpu_display_example (SEG_NUM=4 at 1280x720). */
+#define DL_SEG_NUM_SHALLOW   4U
+/* Full-frame ring budget: width * (16 * frame_segs) * 3/2 above this -> shallow. */
+#define DL_SEG_RING_BUDGET   (128U * 1024U)
+/* Downlink decode ring depth. Configurable via Kconfig (range 3..8, default 4);
+ * see CONFIG_SMART_INTERCOM_DL_SLOT_COUNT for the sizing rationale. Fall back to
+ * 4 if the symbol is somehow undefined. */
+#ifdef CONFIG_SMART_INTERCOM_DL_SLOT_COUNT
+#define DL_SLOT_COUNT        ((uint32_t)CONFIG_SMART_INTERCOM_DL_SLOT_COUNT)
+#else
+#define DL_SLOT_COUNT        4U
+#endif
+/* Lower bound for a coded-AU slot, protecting tiny resolutions. The real slot
+ * size is resolution-driven (see dl_start): a raw NV12 frame (W*H*3/2) is a
+ * guaranteed upper bound for any coded H.264 AU, so the slot never overflows
+ * yet stays far smaller than the transport's fixed JPEG_FRAME_SIZE(100KB). The
+ * transport's frame_size is only a hint to malloc_cb; our zero-copy allocator
+ * owns the real buffer and ignores that hint. */
+#define DL_SLOT_CAPACITY_MIN (16U * 1024U)
+/* Max coded H.264 AU size (matches uplink encoder / mds_img_manager). At 720p
+ * the raw NV12 frame is ~1.38MB but Annex-B access units are far smaller. */
+#ifndef CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER
+#define DL_H264_AU_CAP_MAX   (512U * 1024U)
+#else
+#define DL_H264_AU_CAP_MAX   ((uint32_t)CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER)
+#endif
 #define DL_DECODE_TIMEOUT_MS 1000U
 #define DL_POP_TIMEOUT_MS    100U
+/* Min interval between doorbell.notify.requestKeyFrame sends (>=300ms)
+ * to avoid an IDR-request storm when frames keep being lost. */
+#define DL_KEYREQ_MIN_INTERVAL_MS 300U
 
 #define DL_TASK_PRIORITY     3U
 #define DL_TASK_STACK        (1024U * 16U)
 
 /* Default local self-view (PIP) geometry. */
-/* PIP self-view window. Enlarged to 640x360 to match the PIP small-window size
- * of h264d_gpu_display_example. MUST match camera_board.isp.sp_width/height in
- * ap_main.c. SP is non-flexa, so only WIDTH needs 16-alignment for GPU/DMA
- * stride (640/16=40) and both dims must be even for NV12 (360 is even).
- * At 90/270 blit rotation a 640x360 source occupies a 360x640 footprint in the
- * 1080x1920 display space (688,32 right-anchored), which fits on screen. */
-#define DL_PIP_WIDTH         640U
-#define DL_PIP_HEIGHT        360U
+/* PIP self-view window. Reduced to 320x180 (was 640x360) to cut the PIP
+ * compositing cost: with the dual-720p pipeline (downlink decode + GPU
+ * composite + uplink ISP MP + H.264 encoder) the 640x360@15fps self-view added
+ * ~5MB/s of PSRAM traffic + a large per-frame GPU blit, inflating the main
+ * compositor frame time to 150ms-2s and starving the downlink slots (ref-break
+ * / wait-IDR storm). 320x180 is 1/4 the pixels -> ~4x less SP write, PSRAM read
+ * and blit work, while keeping the self-view at full 15fps.
+ * MUST match camera_board.isp.sp_width/height in ap_main.c. SP is non-flexa, so
+ * only WIDTH needs 16-alignment for GPU/DMA stride (320/16=20) and both dims
+ * must be even for NV12 (180 is even). The GPU blit does NOT scale (blit config
+ * has no dst_width/height), so the on-screen window is drawn 1:1 and is now half
+ * the linear size; at 90/270 blit rotation a 320x180 source occupies a 180x320
+ * footprint, right-anchored at (disp_w-180-32, 32) in the display space. */
+#define DL_PIP_WIDTH         320U
+#define DL_PIP_HEIGHT        180U
 #define DL_PIP_MARGIN        32U
 
 typedef struct
@@ -85,9 +94,93 @@ typedef struct
 
     beken_thread_t task;
     beken_semaphore_t done_sem;
+    uint8_t pip_deferred;  /* uplink+720p: PIP held until first decode succeeds */
+    volatile uint8_t ref_break_pending; /* set on slot-starvation drop */
 } dl_video_ctx_t;
 
 static dl_video_ctx_t s_dl = {0};
+
+void doorbell_downlink_video_notify_ref_break(void)
+{
+    if (s_dl.running != 0U)
+    {
+        s_dl.ref_break_pending = 1U;
+    }
+}
+
+static void dl_apply_ref_break(uint8_t *wait_idr,
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+                               uint32_t *last_keyreq_ms,
+#endif
+                               const char *reason)
+{
+    (void)reason;
+
+    if (s_dl.ref_break_pending == 0U)
+    {
+        return;
+    }
+    s_dl.ref_break_pending = 0U;
+
+#if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
+    if (wait_idr != NULL)
+    {
+        *wait_idr = 1U;
+    }
+#endif
+
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+    if (last_keyreq_ms != NULL)
+    {
+        uint32_t now = rtos_get_time();
+        if ((now - *last_keyreq_ms) >= DL_KEYREQ_MIN_INTERVAL_MS)
+        {
+            (void)doorbell_notify_request_keyframe("frameLoss", "h264");
+            *last_keyreq_ms = now;
+        }
+    }
+#endif
+}
+
+/* Pick FLEXA ring depth from negotiated resolution. Full-frame (height/16 segs)
+ * when the ring fits HSRAM; otherwise shallow DL_SEG_NUM_SHALLOW (1280x720 -> 4
+ * segs / ~120KB, same as h264d_gpu_display_example). */
+static uint32_t dl_seg_num_for_resolution(uint16_t width, uint16_t height)
+{
+    uint32_t frame_segs = (uint32_t)((height + 15U) / 16U);
+    uint32_t full_ring;
+
+    if (frame_segs == 0U)
+    {
+        return DL_SEG_NUM_SHALLOW;
+    }
+
+    full_ring = bk_image_size_get(width, 16U * frame_segs, BK_PIXEL_FORMAT_NV12);
+    if (full_ring > DL_SEG_RING_BUDGET)
+    {
+        return DL_SEG_NUM_SHALLOW;
+    }
+    return frame_segs;
+}
+
+/* Coded-slot byte capacity: sub-720p keeps the NV12 frame size (tiny, exact);
+ * 720p-class uses DL_H264_AU_CAP_MAX so 3 slots ~= 1.38MB not 4.1MB. */
+static uint32_t dl_slot_capacity_for_resolution(uint16_t width, uint16_t height)
+{
+    uint32_t nv12_cap = bk_image_size_get(width, height, BK_PIXEL_FORMAT_NV12);
+    uint32_t cap = nv12_cap;
+
+    (void)width;
+    if (height >= 720U || nv12_cap > DL_H264_AU_CAP_MAX)
+    {
+        cap = DL_H264_AU_CAP_MAX;
+    }
+    if (cap < DL_SLOT_CAPACITY_MIN)
+    {
+        cap = DL_SLOT_CAPACITY_MIN;
+    }
+    return cap;
+}
 
 /* FLEXA ring is consumed by GPU/DMA directly -> 64-byte alignment. */
 static void *dl_hsram_aligned_malloc(uint32_t alignment, uint32_t size)
@@ -131,6 +224,26 @@ static void dl_hsram_aligned_free(void *ptr)
 static void dl_decode_task_entry(void *arg)
 {
     uint32_t decoded = 0U;
+    /* Error-resilience state: this stream is IPPP with P frames chained to the
+     * previous frame (max_num_ref_frames=1), so once any frame is lost the
+     * reference chain is broken and every following P decodes to garbage /
+     * hardware error until the next IDR. Feeding those broken P frames to the
+     * HW decoder also spends CPU and floods the error path, which worsens the
+     * backlog that caused the loss. So: after a decode failure (broken ref),
+     * enter "wait for IDR" and cheaply discard non-IDR AUs (recycling their
+     * slot fast) until an IDR access unit arrives to resynchronize.
+     * Gated by CONFIG_SMART_INTERCOM_DL_WAIT_IDR (default on); when off, every
+     * AU is fed to the decoder as before. */
+#if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
+    uint8_t wait_idr = 1U;
+#else
+    uint8_t wait_idr = 0U;
+#endif
+    uint32_t skipped = 0U;
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+    /* Last doorbell.notify.requestKeyFrame send time, for >=300ms debounce. */
+    uint32_t last_keyreq_ms = 0U;
+#endif
 
     (void)arg;
     LOGI("decode task started, %ux%u\n", (unsigned)s_dl.cfg.width, (unsigned)s_dl.cfg.height);
@@ -141,34 +254,116 @@ static void dl_decode_task_entry(void *arg)
         bk_h264_decode_input_t input = {0};
         bk_h264_decode_info_t info = {0};
         avdk_err_t ret;
+        uint8_t is_idr = 0U;
 
         frame = doorbell_downlink_ready_pop(DL_POP_TIMEOUT_MS);
         if (frame == NULL)
         {
+            dl_apply_ref_break(&wait_idr,
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+                               &last_keyreq_ms,
+#endif
+                               "idle");
             continue;
         }
+
+        dl_apply_ref_break(&wait_idr,
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+                           &last_keyreq_ms,
+#endif
+                           "slot_drop");
 
         input.stream = frame->data;
         input.stream_len = frame->size;
         input.out_buffer = s_dl.pp_buf;
         input.out_buffer_size = s_dl.pp_size;
 
+        /* Scan the access unit for an IDR slice (NAL unit_type 5), which marks a
+         * resync point for the wait-for-IDR gate below. */
+        {
+            const uint8_t *p = frame->data;
+            uint32_t n = frame->size;
+            uint32_t i;
+
+            for (i = 0U; (n >= 3U) && (i + 2U < n); i++)
+            {
+                if (p[i] == 0U && p[i + 1U] == 0U && p[i + 2U] == 1U)
+                {
+                    if (i + 3U < n)
+                    {
+                        uint8_t nal_t = (uint8_t)(p[i + 3U] & 0x1fU);
+                        if (nal_t == 5U) /* IDR slice -> resync point */
+                        {
+                            is_idr = 1U;
+                        }
+                    }
+                }
+            }
+        }
+
+#if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
+        /* Resync gate: while waiting for an IDR, drop non-IDR AUs without
+         * decoding. Recycling the slot immediately drains the ready ring and
+         * lets the producer keep up, and skips the useless broken-reference
+         * decode + error dump. */
+        if (wait_idr != 0U && is_idr == 0U)
+        {
+            skipped++;
+            doorbell_downlink_free_push(frame);
+            continue;
+        }
+#endif /* CONFIG_SMART_INTERCOM_DL_WAIT_IDR */
+
         ret = bk_h264_decode_frame(s_dl.decoder, &input);
+
         if (ret == AVDK_ERR_OK)
         {
             (void)bk_h264_decode_get_info(s_dl.decoder, &info);
             decoded++;
+#if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
+            wait_idr = 0U; /* reference chain valid again */
+#endif
+            if (s_dl.pip_deferred != 0U)
+            {
+                s_dl.pip_deferred = 0U;
+                if (doorbell_downlink_pip_enable() == BK_OK)
+                {
+                    LOGI("DL720 H2: deferred PIP enabled after first decode\n");
+                }
+                else
+                {
+                    LOGW("DL720 H2: deferred PIP enable failed\n");
+                }
+            }
         }
         else
         {
-            /* Recoverable: next IDR resets reference state. */
-            LOGW("decode failed ret=%d (decoded=%u)\n", (int)ret, (unsigned)decoded);
+            /* Broken reference (lost frame) or undecodable IDR. */
+#if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
+            wait_idr = 1U; /* wait for the next IDR to resynchronize */
+#endif
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+            /* Ask the App to force an immediate IDR (doorbell.notify.requestKeyFrame),
+             * rate-limited to avoid an IDR-request storm. Only a
+             * genuine decode failure (a lost reference) triggers this, so an
+             * undecodable IDR is also covered. With DL_WAIT_IDR on, at most one
+             * failure fires per loss event; with it off, the debounce caps sends. */
+            {
+                uint32_t now = rtos_get_time();
+                if ((now - last_keyreq_ms) >= DL_KEYREQ_MIN_INTERVAL_MS)
+                {
+                    (void)doorbell_notify_request_keyframe("frameLoss", "h264");
+                    last_keyreq_ms = now;
+                }
+            }
+#endif
         }
 
         doorbell_downlink_free_push(frame);
     }
 
-    LOGI("decode task exiting, decoded=%u\n", (unsigned)decoded);
+    LOGI("decode task exiting, decoded=%u skipped=%u\n",
+         (unsigned)decoded, (unsigned)skipped);
     if (s_dl.done_sem != NULL)
     {
         (void)rtos_set_semaphore(&s_dl.done_sem);
@@ -290,18 +485,69 @@ static void dl_zerocopy_register(void)
 }
 #endif /* CONFIG_SMART_INTERCOM_DL_ZEROCOPY */
 
+/* Compute the PIP self-view geometry into a compositor config.
+ *
+ * The GPU blit overlay composites into the POST-rotation display buffer: for a
+ * 90/270 main rotation its dimensions are swapped to (dst_h x dst_w). The blit
+ * is itself rotated by pip_rotate, so a DL_PIP_WIDTH x DL_PIP_HEIGHT source
+ * occupies a transposed DL_PIP_HEIGHT x DL_PIP_WIDTH footprint. Both the anchor
+ * base AND the footprint must be expressed in that rotated display space, or the
+ * window lands outside the buffer width and only stride-wrap fragments render.
+ *
+ * pip_enable reflects whether the local ISP SP self-view source exists right now
+ * (camera on). When downlink starts before the camera, pip is off here and gets
+ * enabled later via doorbell_downlink_pip_enable(). When uplink is already on
+ * and downlink is 720p-class, defer PIP so the H.264 decoder recon pool can
+ * allocate before the SP channel (~690KB) is opened. */
+static void dl_fill_pip_cfg(doorbell_compositor_config_t *comp_cfg,
+                            const doorbell_downlink_h264_config_t *dl_cfg,
+                            bool defer_for_memory)
+{
+    gpu_board_config_t *board = app_gpu_board_config_get();
+    uint16_t dst_w = 1920U;
+    uint16_t dst_h = 1080U;
+
+    if (board != NULL && board->flexa.dst_width != 0U && board->flexa.dst_height != 0U)
+    {
+        dst_w = board->flexa.dst_width;
+        dst_h = board->flexa.dst_height;
+    }
+    comp_cfg->pip_enable = (doorbell_devices_isp_handle_get() != NULL);
+    if (defer_for_memory && comp_cfg->pip_enable &&
+        dl_cfg != NULL && dl_cfg->height >= 720U &&
+        doorbell_devices_uplink_active())
+    {
+        comp_cfg->pip_enable = false;
+    }
+    comp_cfg->pip_width = DL_PIP_WIDTH;
+    comp_cfg->pip_height = DL_PIP_HEIGHT;
+    comp_cfg->pip_rotate = (board != NULL) ? board->flexa.degree : 90U;
+    {
+        bool rot = (comp_cfg->pip_rotate == 90U || comp_cfg->pip_rotate == 270U);
+        /* Display-buffer dimensions (post main rotation). */
+        uint16_t disp_w = rot ? dst_h : dst_w;
+        uint16_t disp_h = rot ? dst_w : dst_h;
+        /* PIP footprint in that display space (post blit rotation). */
+        uint16_t vis_w = rot ? DL_PIP_HEIGHT : DL_PIP_WIDTH;
+        uint16_t vis_h = rot ? DL_PIP_WIDTH : DL_PIP_HEIGHT;
+        /* Right-anchored, top margin (WeChat-style self-view). */
+        comp_cfg->pip_dst_x = (disp_w > (vis_w + DL_PIP_MARGIN)) ? (disp_w - vis_w - DL_PIP_MARGIN) : 0U;
+        comp_cfg->pip_dst_y = (disp_h > (vis_h + DL_PIP_MARGIN)) ? DL_PIP_MARGIN : 0U;
+    }
+}
+
 static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
 {
     doorbell_compositor_config_t comp_cfg = {0};
     bk_h264_decode_flexa_config_t dec_cfg = DEFAULT_H264_DECODE_FLEXA_CONFIG;
-    gpu_board_config_t *board;
-    uint16_t dst_w = 1920U;
-    uint16_t dst_h = 1080U;
     uint32_t slot_capacity;
+    uint32_t seg_num;
     bk_err_t bk_ret;
     avdk_err_t ret;
 
     s_dl.cfg = *cfg;
+    s_dl.pip_deferred = 0U;
+    seg_num = dl_seg_num_for_resolution(cfg->width, cfg->height);
 
     /* Enter intercom mode: hand the GPU (and its HSRAM FLEXA ring) over from the
      * single-view preview to the downlink compositor. The uplink ISP MP -> H264
@@ -309,22 +555,25 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
     (void)doorbell_devices_preview_gpu_detach();
 
     s_dl.pp_size = bk_image_size_get(cfg->width,
-                                     16U * DL_SEG_HEIGHT_MB * DL_SEG_NUM,
+                                     16U * DL_SEG_HEIGHT_MB * seg_num,
                                      BK_PIXEL_FORMAT_NV12);
     s_dl.pp_buf = (uint8_t *)dl_hsram_aligned_malloc(64U, s_dl.pp_size);
     if (s_dl.pp_buf == NULL)
     {
-        LOGE("alloc pp_buf (%u) failed\n", (unsigned)s_dl.pp_size);
+        LOGE("DL720 H3: alloc pp_buf (%u) failed seg=%u\n",
+             (unsigned)s_dl.pp_size, (unsigned)seg_num);
         return BK_ERR_NO_MEM;
     }
     os_memset(s_dl.pp_buf, 0, s_dl.pp_size);
 
-    /* Coded AU slots: a compressed frame is well under the raw NV12 size. */
-    slot_capacity = (uint32_t)cfg->width * (uint32_t)cfg->height;
+    /* Coded AU slots: at 720p use the H.264 AU cap (~460KB), not raw NV12
+     * (~1.38MB), so img_manager_init stays within MEM_SLAB_HEAP_CODED. */
+    slot_capacity = dl_slot_capacity_for_resolution(cfg->width, cfg->height);
     bk_ret = doorbell_downlink_img_manager_init(DL_SLOT_COUNT, slot_capacity);
     if (bk_ret != BK_OK)
     {
-        LOGE("img manager init failed=%d\n", bk_ret);
+        LOGE("DL720 H1: img manager init failed=%d slots=%u cap=%u\n",
+             bk_ret, (unsigned)DL_SLOT_COUNT, (unsigned)slot_capacity);
         goto fail_pp;
     }
 
@@ -333,42 +582,21 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
     dl_zerocopy_register();
 #endif
 
-    /* Compose PIP top-right of the DISPLAY buffer.
-     *
-     * The GPU blit overlay (gpu_flex_data_frame_done_blit) composites into the
-     * POST-rotation display buffer: for a 90/270 main rotation its dimensions
-     * are swapped to (dst_h x dst_w). The blit is itself rotated by pip_rotate,
-     * so a DL_PIP_WIDTH x DL_PIP_HEIGHT source occupies a transposed
-     * DL_PIP_HEIGHT x DL_PIP_WIDTH footprint. Both the anchor base AND the
-     * footprint must therefore be expressed in that rotated display space, or
-     * the window lands outside the buffer width and only stride-wrap fragments
-     * render. */
-    board = app_gpu_board_config_get();
-    if (board != NULL && board->flexa.dst_width != 0U && board->flexa.dst_height != 0U)
-    {
-        dst_w = board->flexa.dst_width;
-        dst_h = board->flexa.dst_height;
-    }
+    /* Main = decoded remote picture; PIP = local ISP SP self-view (off until the
+     * camera is on, then enabled at runtime via doorbell_downlink_pip_enable). */
     comp_cfg.main_width = cfg->width;
     comp_cfg.main_height = cfg->height;
-    comp_cfg.pip_enable = (doorbell_devices_isp_handle_get() != NULL);
-    comp_cfg.pip_width = DL_PIP_WIDTH;
-    comp_cfg.pip_height = DL_PIP_HEIGHT;
-    comp_cfg.pip_rotate = (board != NULL) ? board->flexa.degree : 90U;
+    dl_fill_pip_cfg(&comp_cfg, cfg, true);
+    s_dl.pip_deferred = (comp_cfg.pip_enable == 0U &&
+                         doorbell_devices_isp_handle_get() != NULL &&
+                         cfg->height >= 720U &&
+                         doorbell_devices_uplink_active()) ? 1U : 0U;
+    if (s_dl.pip_deferred != 0U)
     {
-        bool rot = (comp_cfg.pip_rotate == 90U || comp_cfg.pip_rotate == 270U);
-        /* Display-buffer dimensions (post main rotation). */
-        uint16_t disp_w = rot ? dst_h : dst_w;
-        uint16_t disp_h = rot ? dst_w : dst_h;
-        /* PIP footprint in that display space (post blit rotation). */
-        uint16_t vis_w = rot ? DL_PIP_HEIGHT : DL_PIP_WIDTH;
-        uint16_t vis_h = rot ? DL_PIP_WIDTH : DL_PIP_HEIGHT;
-        /* Right-anchored, top margin (WeChat-style self-view). */
-        comp_cfg.pip_dst_x = (disp_w > (vis_w + DL_PIP_MARGIN)) ? (disp_w - vis_w - DL_PIP_MARGIN) : 0U;
-        comp_cfg.pip_dst_y = (disp_h > (vis_h + DL_PIP_MARGIN)) ? DL_PIP_MARGIN : 0U;
+        LOGI("DL720 H2: defer PIP until first decode (uplink+720p)\n");
     }
 
-    bk_ret = doorbell_compositor_start(&comp_cfg, s_dl.pp_buf, DL_SEG_NUM);
+    bk_ret = doorbell_compositor_start(&comp_cfg, s_dl.pp_buf, seg_num);
     if (bk_ret != BK_OK)
     {
         LOGE("compositor start failed=%d\n", bk_ret);
@@ -380,7 +608,7 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
     dec_cfg.out_height = cfg->height;
     dec_cfg.out_format = BK_PIXEL_FORMAT_NV12;
     dec_cfg.segment_height = DL_SEG_HEIGHT_MB;
-    dec_cfg.segment_number = DL_SEG_NUM;
+    dec_cfg.segment_number = seg_num;
 
     ret = bk_h264_decode_flexa_ctlr_new(&s_dl.decoder, &dec_cfg);
     if (ret != AVDK_ERR_OK)
@@ -426,8 +654,9 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
         goto fail_bond;
     }
 
-    LOGI("downlink video started, %ux%u fps=%u\n",
-         (unsigned)cfg->width, (unsigned)cfg->height, (unsigned)cfg->fps);
+    LOGI("downlink video started, %ux%u fps=%u seg=%u slots=%u slot_cap=%u\n",
+         (unsigned)cfg->width, (unsigned)cfg->height, (unsigned)cfg->fps,
+         (unsigned)seg_num, (unsigned)DL_SLOT_COUNT, (unsigned)slot_capacity);
     return BK_OK;
 
 fail_bond:
@@ -481,6 +710,38 @@ bk_err_t doorbell_downlink_set_h264_receive_config(const doorbell_downlink_h264_
     return dl_start(cfg);
 }
 
+bk_err_t doorbell_downlink_pip_enable(void)
+{
+    doorbell_compositor_config_t comp_cfg = {0};
+
+    if (s_dl.running == 0U || !doorbell_compositor_is_running())
+    {
+        return BK_ERR_STATE;
+    }
+    dl_fill_pip_cfg(&comp_cfg, &s_dl.cfg, false);
+    if (!comp_cfg.pip_enable)
+    {
+        /* Local ISP SP self-view source not up yet (camera off). */
+        return BK_ERR_STATE;
+    }
+    LOGI("PIP enable requested on running compositor (isp ready)\n");
+    return doorbell_compositor_pip_enable(&comp_cfg);
+}
+
+bk_err_t doorbell_downlink_pip_disable(void)
+{
+    if (!doorbell_compositor_is_running())
+    {
+        return BK_ERR_STATE;
+    }
+    /* Local uplink/camera going off: drop the self-view overlay so the small
+     * window stops showing the last (now stale) ISP SP frame. Downlink main
+     * picture keeps running on the compositor. */
+    s_dl.pip_deferred = 0U;
+    LOGI("PIP disable requested (uplink/camera off)\n");
+    return doorbell_compositor_pip_disable();
+}
+
 bool doorbell_downlink_video_is_running(void)
 {
     return (s_dl.running != 0U);
@@ -498,7 +759,8 @@ int doorbell_downlink_video_recv(uint8_t *data, uint32_t length)
     frame = doorbell_downlink_free_request();
     if (frame == NULL)
     {
-        /* Consumer behind: drop this frame. */
+        /* Consumer behind: drop this frame and break the P-frame ref chain. */
+        doorbell_downlink_video_notify_ref_break();
         return BK_OK;
     }
     if (length > frame->capacity)

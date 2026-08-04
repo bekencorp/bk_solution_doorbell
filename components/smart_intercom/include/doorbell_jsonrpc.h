@@ -30,6 +30,21 @@ void doorbell_jsonrpc_handle_cmd(const char *json, uint32_t length);
  */
 bk_err_t doorbell_jsonrpc_send_notify(const char *method, void *params);
 
+/**
+ * @brief Notify the App to force an immediate IDR (key frame) after the
+ *        downlink decoder detects frame loss / a broken reference.
+ *
+ * Sends the device-originated JSON-RPC notification
+ * "doorbell.notify.requestKeyFrame" with params { reason, imageFormat }
+ * The caller is responsible for rate-limiting to avoid
+ * an IDR-request storm.
+ *
+ * @param reason        Trigger reason, e.g. "frameLoss" or "decodeError".
+ * @param image_format  Downlink image format, e.g. "h264".
+ * @return BK_OK on success.
+ */
+bk_err_t doorbell_notify_request_keyframe(const char *reason, const char *image_format);
+
 #ifdef __cplusplus
 }
 #endif

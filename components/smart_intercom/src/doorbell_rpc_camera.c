@@ -55,13 +55,6 @@ static int db_parse_stream(cJSON *stream, camera_parameters_t *out)
     cJSON *h;
     cJSON *fps;
 
-    /* #region agent log (debug 7ee2d5) */
-    BK_LOGI(TAG, "[DBG7ee2d5][hyp-C/D] parse_stream: cameraType=%s isStr=%d cameraConfig=%s\n",
-            cam_type ? (cJSON_IsString(cam_type) ? cam_type->valuestring : "<not-string>") : "<null>",
-            cam_type ? cJSON_IsString(cam_type) : -1,
-            cam_cfg ? "present" : "<null>");
-    /* #endregion */
-
     if (cam_type == NULL || !cJSON_IsString(cam_type) || cam_cfg == NULL)
     {
         return BK_FAIL;
@@ -74,17 +67,6 @@ static int db_parse_stream(cJSON *stream, camera_parameters_t *out)
         os_strcmp(cam_type->valuestring, "dvp") == 0)
     {
         cfg = cJSON_GetObjectItem(cam_cfg, cam_type->valuestring);
-        /* #region agent log (debug 7ee2d5) */
-        {
-            cJSON *vf_dbg = cfg ? cJSON_GetObjectItem(cfg, "videoFormat") : NULL;
-            BK_LOGI(TAG, "[DBG7ee2d5][hyp-C/D] %s cfg=%s w=%s h=%s fps=%s videoFormat=%s\n",
-                    cam_type->valuestring, cfg ? "present" : "<null>",
-                    db_json_int(cfg, "width") ? "ok" : "MISS/!num",
-                    db_json_int(cfg, "height") ? "ok" : "MISS/!num",
-                    db_json_int(cfg, "fps") ? "ok" : "MISS/!num",
-                    (vf_dbg && cJSON_IsString(vf_dbg)) ? vf_dbg->valuestring : "<null/!str>");
-        }
-        /* #endregion */
         if (cfg == NULL)
         {
             return BK_FAIL;
@@ -126,18 +108,6 @@ static int db_parse_stream(cJSON *stream, camera_parameters_t *out)
     else if (os_strcmp(cam_type->valuestring, "uvc") == 0)
     {
         cfg = cJSON_GetObjectItem(cam_cfg, "uvc");
-        /* #region agent log (debug 7ee2d5) */
-        {
-            cJSON *vf_dbg = cfg ? cJSON_GetObjectItem(cfg, "videoFormat") : NULL;
-            BK_LOGI(TAG, "[DBG7ee2d5][hyp-C/D] uvc cfg=%s w=%s h=%s fps=%s port=%s videoFormat=%s\n",
-                    cfg ? "present" : "<null>",
-                    db_json_int(cfg, "width") ? "ok" : "MISS/!num",
-                    db_json_int(cfg, "height") ? "ok" : "MISS/!num",
-                    db_json_int(cfg, "fps") ? "ok" : "MISS/!num",
-                    db_json_int(cfg, "port") ? "ok" : "MISS/!num",
-                    (vf_dbg && cJSON_IsString(vf_dbg)) ? vf_dbg->valuestring : "<null/!str>");
-        }
-        /* #endregion */
         if (cfg == NULL)
         {
             return BK_FAIL;

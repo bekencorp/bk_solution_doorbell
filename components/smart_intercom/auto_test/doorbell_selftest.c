@@ -32,8 +32,8 @@
 
 /* ISP MP encode geometry (see ap_main.c camera_board.isp.mp_*): the downlink
  * decoder must be configured to the same size for the loopback to decode. */
-#define DB_ST_LOOPBACK_WIDTH  256
-#define DB_ST_LOOPBACK_HEIGHT 144
+#define DB_ST_LOOPBACK_WIDTH  1280
+#define DB_ST_LOOPBACK_HEIGHT 720
 #define DB_ST_LOOPBACK_FPS    15
 
 #define DB_ST_RAW_JSON_MAX    1024
@@ -101,7 +101,7 @@ static const db_st_preset_t s_rpc_presets[] =
 static const char s_cam_on_json[] =
     "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"doorbell.camera.turnOn\",\"params\":"
     "{\"streamCount\":1,\"streams\":[{\"cameraType\":\"mipi\",\"cameraConfig\":"
-    "{\"mipi\":{\"width\":256,\"height\":144,\"fps\":15,\"videoFormat\":\"h264\",\"sensorId\":1}}}]}}";
+    "{\"mipi\":{\"width\":1280,\"height\":720,\"fps\":15,\"videoFormat\":\"h264\",\"sensorId\":1}}}]}}";
 
 static const char s_cam_off_json[] =
     "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"doorbell.camera.turnOff\",\"params\":{\"target\":\"all\"}}";
@@ -116,7 +116,7 @@ static const char s_lcd_off_json[] =
 /* width/height must match ISP MP (ap_main.c) = the actual uplink encode size. */
 static const char s_downlink_cfg_json[] =
     "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"doorbell.imageStream.setReceiveConfig\",\"params\":"
-    "{\"imageFormat\":\"h264\",\"formatConfig\":{\"h264\":{\"width\":256,\"height\":144,\"fps\":15,\"pFrameCount\":29}}}}";
+    "{\"imageFormat\":\"h264\",\"formatConfig\":{\"h264\":{\"width\":1280,\"height\":720,\"fps\":15,\"pFrameCount\":29}}}}";
 
 static void db_st_inject(const char *json)
 {

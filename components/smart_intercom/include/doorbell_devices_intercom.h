@@ -30,6 +30,14 @@ extern "C" {
 void *doorbell_devices_isp_handle_get(void);
 
 /**
+ * @brief Whether the uplink camera + H.264 encode path is active.
+ *
+ * When true alongside 720p downlink decode, PSRAM is tight (decoder recon pool
+ * + uplink encoder + PIP SP). Used to defer PIP until the first decoded frame.
+ */
+bool doorbell_devices_uplink_active(void);
+
+/**
  * @brief Detach the single-view preview GPU bond (ISP MP -> GPU -> LCD).
  *
  * Used when entering the intercom/downlink mode: the full-screen local preview

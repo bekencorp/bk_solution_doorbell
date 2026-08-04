@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-/* JSON-RPC 2.0 standard error codes (IoT通讯协议.docx §3.2.5). */
+/* JSON-RPC 2.0 standard error codes */
 #define DB_RPC_ERR_PARSE        (-32700) /* JSON parse error            */
 #define DB_RPC_ERR_INVALID_REQ  (-32600) /* invalid request            */
 #define DB_RPC_ERR_METHOD       (-32601) /* method not found           */

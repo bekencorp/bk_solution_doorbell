@@ -36,8 +36,41 @@ bk_err_t doorbell_downlink_set_h264_receive_config(const doorbell_downlink_h264_
 /** @brief Stop and tear down the downlink pipeline. Safe if not running. */
 bk_err_t doorbell_downlink_video_stop(void);
 
+/**
+ * @brief Enable the PIP self-view overlay on an already-running compositor.
+ *
+ * Used when the downlink pipeline was started before the local camera: the
+ * compositor comes up with PIP off (no ISP SP source yet). Once the camera is
+ * turned on, this attaches the local ISP SP self-view to the running compositor.
+ * No-op / BK_ERR_STATE if downlink is not running or the ISP is not up.
+ *
+ * @return BK_OK on success.
+ */
+bk_err_t doorbell_downlink_pip_enable(void);
+
+/**
+ * @brief Disable the PIP self-view overlay when the local camera/uplink is off.
+ *
+ * Counterpart to doorbell_downlink_pip_enable(). Stops blitting the local ISP SP
+ * self-view and clears the small window so it no longer shows the last stale SP
+ * frame; the downlink main picture keeps running. No-op / BK_ERR_STATE if the
+ * compositor is not running.
+ *
+ * @return BK_OK on success.
+ */
+bk_err_t doorbell_downlink_pip_disable(void);
+
 /** @brief Whether the downlink decode pipeline is running. */
 bool doorbell_downlink_video_is_running(void);
+
+/**
+ * @brief Producer lost an access unit because no decode slot was free.
+ *
+ * Marks the H.264 reference chain broken (same effect as a decode failure) so
+ * the decode task enters wait-for-IDR instead of feeding the next P frame
+ * against a missing reference (macroblock mosaic on motion regions).
+ */
+void doorbell_downlink_video_notify_ref_break(void);
 
 /**
  * @brief Network video-channel producer: submit one received H.264 access unit.

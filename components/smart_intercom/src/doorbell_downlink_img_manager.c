@@ -8,6 +8,7 @@
 #endif
 
 #include "doorbell_downlink_img_manager.h"
+#include "doorbell_downlink_video.h"
 
 #define TAG "db-dl-mgr"
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
@@ -255,6 +256,11 @@ frame_buffer_t *doorbell_downlink_slot_fb_alloc(uint32_t size)
     downlink_frame_t *slot;
     int idx;
 
+    /* The transport passes its JPEG_FRAME_SIZE hint here, but we own the
+     * buffer: slots are sized by dl_slot_capacity_for_resolution(), not the
+     * hint. The reassembly layer still guards overflow against capacity. */
+    (void)size;
+
     if (!s_mgr.inited)
     {
         return NULL;
@@ -263,12 +269,7 @@ frame_buffer_t *doorbell_downlink_slot_fb_alloc(uint32_t size)
     slot = doorbell_downlink_free_request();
     if (slot == NULL)
     {
-        return NULL;
-    }
-    if (size > slot->capacity)
-    {
-        LOGE("fb_alloc: req %u > slot cap %u\n", (unsigned)size, (unsigned)slot->capacity);
-        (void)doorbell_downlink_free_push(slot);
+        doorbell_downlink_video_notify_ref_break();
         return NULL;
     }
 

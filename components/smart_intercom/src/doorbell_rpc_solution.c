@@ -22,9 +22,10 @@
  *
  * configs enumerates the methods this solution supports, each with a default
  * parameter template the app can use as-is. Values mirror the actual
- * video_intercom board pipeline: gc2053 MIPI sensor -> ISP MP 256x144 h264
+ * video_intercom board pipeline: gc2053 MIPI sensor -> ISP MP 1280x720 h264
  * uplink; hx8399c 1080x1920 MIPI panel; 16 kHz PCM two-way audio (AEC on);
- * h264 downlink image stream (256x144). See ap/ap_main.c for the board setup.
+ * h264 downlink image stream (1280x720); ISP SP 640x360 for local PIP only.
+ * See ap/ap_main.c for the board setup.
  */
 
 /* Append a parameter-less methodConfig {"method": m} to the configs array. */
@@ -178,8 +179,14 @@ static cJSON *p_image_set_recv_config(void)
         if (h264 != NULL) cJSON_Delete(h264);
         return p;
     }
-    cJSON_AddNumberToObject(h264, "width", 256);
-    cJSON_AddNumberToObject(h264, "height", 144);
+    cJSON_AddNumberToObject(h264, "width", 1280);
+    cJSON_AddNumberToObject(h264, "height", 720);
+    /* Downlink (phone -> device) capture rate negotiated with the App. Once the
+     * App sends a clean contiguous IPPP stream (no mid-GOP encoded-frame drops),
+     * decode is stable with no reference-chain breaks, so the rate can be raised
+     * from 10 to 20 fps for smoother playback. The decode+GPU+compose stage must
+     * still keep up. At 1280x720, 15fps leaves more decode budget per frame than
+     * 20fps. */
     cJSON_AddNumberToObject(h264, "fps", 15);
     cJSON_AddNumberToObject(h264, "pFrameCount", 29);
     cJSON_AddItemToObject(fc, "h264", h264);
@@ -215,8 +222,8 @@ static cJSON *p_camera_turn_on(void)
     }
     cJSON_AddStringToObject(mipi, "sensorName", "gc2053");
     cJSON_AddNumberToObject(mipi, "sensorId", 1);
-    cJSON_AddNumberToObject(mipi, "width", 256);
-    cJSON_AddNumberToObject(mipi, "height", 144);
+    cJSON_AddNumberToObject(mipi, "width", 1280);
+    cJSON_AddNumberToObject(mipi, "height", 720);
     cJSON_AddNumberToObject(mipi, "fps", 15);
     cJSON_AddStringToObject(mipi, "videoFormat", "h264");
     cJSON_AddNumberToObject(mipi, "rotate", 0);

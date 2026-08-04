@@ -16,4 +16,46 @@ menu "Video Intercom"
         depends on SMART_INTERCOM
         default n
 
+    config SMART_INTERCOM_DL_SLOT_COUNT
+        int "Downlink decode ring slot count"
+        depends on SMART_INTERCOM
+        range 3 8
+        default 4
+        help
+            Number of slots in the downlink H.264 decode ring. The ring absorbs
+            the rate mismatch between network frame reception (producer) and
+            hardware decode (consumer), most notably the ~54ms IDR decode stall
+            during which several P frames keep arriving. Too small drops P frames
+            in that window and breaks the reference chain; too large adds
+            end-to-end latency and consumes more MEM_SLAB_HEAP_CODED (each slot
+            is about W*H*3/2 bytes; at 1280x720 that is ~1.38MB per slot, so
+            3 slots is a practical minimum). Empirically 4~5 is a good balance
+            at sub-720p; use 3 for 720p downlink. Upper bound is 8 slots.
+
+    config SMART_INTERCOM_DL_REQUEST_IDR
+        bool "Downlink request-IDR-on-loss feedback (doorbell.notify.requestKeyFrame)"
+        depends on SMART_INTERCOM
+        default y
+        help
+            When the downlink H.264 decoder hits a broken reference (decode
+            failure from a lost frame), the device sends the JSON-RPC
+            notification doorbell.notify.requestKeyFrame to the App so it can
+            force an immediate IDR and shorten recovery latency (WebRTC FIR/PLI
+            style). The notification is rate-limited (>=300ms between sends) to
+            avoid an IDR-request storm.
+
+    config SMART_INTERCOM_DL_WAIT_IDR
+        bool "Downlink drop-until-IDR error resilience"
+        depends on SMART_INTERCOM
+        default y
+        help
+            The downlink H.264 stream is IPPP with P frames chained to the
+            previous frame (max_num_ref_frames=1), so a single lost frame breaks
+            the reference chain and every following P decodes to garbage / a
+            hardware error until the next IDR. When enabled, the decode task
+            enters a "wait for IDR" state after any decode failure and cheaply
+            discards non-IDR access units (recycling their slot) until an IDR
+            resynchronizes the decoder, avoiding the broken-reference decode and
+            error-dump storm. Disable to always feed every AU to the decoder.
+
 endmenu

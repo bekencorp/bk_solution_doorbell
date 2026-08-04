@@ -23,13 +23,6 @@ bk_err_t doorbell_rpc_image_set_receive_config(cJSON *params, cJSON *id)
     cJSON *image_format = params ? cJSON_GetObjectItem(params, "imageFormat") : NULL;
     cJSON *format_config = params ? cJSON_GetObjectItem(params, "formatConfig") : NULL;
 
-    /* #region agent log (debug 7ee2d5) */
-    BK_LOGI(TAG, "[DBG7ee2d5][hyp-A/B] setRecvCfg: imageFormat=%s isStr=%d formatConfig=%s\n",
-            image_format ? (cJSON_IsString(image_format) ? image_format->valuestring : "<not-string>") : "<null>",
-            image_format ? cJSON_IsString(image_format) : -1,
-            format_config ? "present" : "<null>");
-    /* #endregion */
-
     if (image_format == NULL || !cJSON_IsString(image_format) || format_config == NULL)
     {
         return doorbell_rpc_send_error(id, DB_RPC_ERR_PARAMS, "Invalid receive config", NULL);
@@ -56,6 +49,9 @@ bk_err_t doorbell_rpc_image_set_receive_config(cJSON *params, cJSON *id)
         cfg.p_frame_count = (pfc != NULL) ? (uint16_t)pfc->valueint : 0;
 
         ret = doorbell_downlink_set_h264_receive_config(&cfg);
+        BK_LOGI(TAG, "setRecvCfg h264 %ux%u fps=%u pfc=%u ret=%d\n",
+                (unsigned)cfg.width, (unsigned)cfg.height,
+                (unsigned)cfg.fps, (unsigned)cfg.p_frame_count, (int)ret);
         if (ret != BK_OK)
         {
             return doorbell_rpc_send_error(id, DB_RPC_ERR_INTERNAL, "downlink start failed", NULL);

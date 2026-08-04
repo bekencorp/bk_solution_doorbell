@@ -6,6 +6,7 @@
 #include "doorbell_cmd.h"
 #include "doorbell_devices.h"
 #include "doorbell_devices_intercom.h"
+#include "doorbell_downlink_video.h"
 #include "network_transfer.h"
 #include "doorbell_selftest.h"
 #include "modules/wifi.h"
@@ -50,6 +51,11 @@ db_device_info_t *db_device_info = NULL;
 void *doorbell_devices_isp_handle_get(void)
 {
     return (db_device_info != NULL) ? db_device_info->isp_handle : NULL;
+}
+
+bool doorbell_devices_uplink_active(void)
+{
+    return (db_device_info != NULL && db_device_info->video_enable != 0U);
 }
 
 #if CONFIG_H264_QP_PRESET_QUALITY || CONFIG_H264_QP_PRESET_FIXED_QP || CONFIG_H264_QP_PRESET_BALANCED || CONFIG_H264_QP_PRESET_ANTI_STUTTER || CONFIG_H264_QP_PRESET_LAN_HD
@@ -216,6 +222,20 @@ static int gpu_pipeline_attach(db_device_info_t *info)
     }
     if (info->gpu_handle != NULL)
     {
+        return BK_OK;
+    }
+
+    /* Intercom GPU-ownership guard: while the downlink pipeline runs, the
+     * downlink compositor already owns the single GPU + HSRAM FLEXA ring and
+     * renders the PIP self-view itself. Running the single-view preview GPU path
+     * here would call app_gpu_turn_on -> bk_get_gpu_flexa_buffer on an
+     * already-owned buffer and fail, aborting camera.turnOn, rolling back the
+     * ISP/encoder and freezing the compositor display. The uplink ISP->H264
+     * encode bond is independent of the GPU, so skipping the attach lets uplink
+     * encode + downlink display coexist. */
+    if (doorbell_downlink_video_is_running())
+    {
+        LOGI("gpu_pipeline_attach: downlink compositor owns GPU, skip preview attach\n");
         return BK_OK;
     }
 
@@ -551,6 +571,14 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
                 LOGE("%s, gpu_pipeline_attach failed, ret = %d\n", __func__, ret);
                 goto err;
             }
+            /* If the downlink compositor already owns the GPU (downlink started
+             * before the camera), gpu_pipeline_attach above is a no-op; render the
+             * local self-view by enabling the compositor PIP now that the ISP SP
+             * source exists. */
+            if (doorbell_downlink_video_is_running()) {
+                LOGI("camera on while downlink running: enabling compositor PIP\n");
+                (void)doorbell_downlink_pip_enable();
+            }
         }
 
     }
@@ -614,6 +642,15 @@ int doorbell_camera_turn_off(void)
     {
         LOGE("%s, already close %d\n", __func__, __LINE__);
         return ret;
+    }
+
+    /* Turning the local uplink/camera off: first drop the downlink PIP self-view
+     * so the compositor stops blitting the ISP SP frames (small window would
+     * otherwise freeze on the last SP frame). Must run before the ISP teardown
+     * below so the PIP task is joined while its SP source is still valid. */
+    if (doorbell_downlink_video_is_running())
+    {
+        (void)doorbell_downlink_pip_disable();
     }
 
     if (info->camera_id == UVC_DEVICE_ID)

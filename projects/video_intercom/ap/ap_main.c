@@ -50,35 +50,27 @@ int main(void)
     camera_board.mipi.sensor_fps = 15;
     camera_board.isp.mp_enable = true;
     camera_board.isp.mp_flexa = true;
-    /* Uplink encode source = ISP MP. Set to 256x144 (exact 16:9, uniform 7.5x
-     * downscale of the 1080p sensor). This is the seam-free HSRAM-safe sweet
-     * spot: at 256x144 the frame is 9 x 16-line rows, so a FULL-FRAME (no
-     * mid-picture wrap) FLEXA ring is only ~55KB (see DL_SEG_NUM=9) and fits
-     * HSRAM alongside the GPU 128KB composite + uplink encode + PIP. 512x288
-     * (18 rows) needed a full-frame ring of ~221KB that does NOT fit HSRAM, so
-     * it was forced onto a shallow 4-segment ring whose mid-picture ring-wrap
-     * de-syncs the h264d->GPU FLEXA bond and makes the downlink decoder raise
-     * VCDEC_DEC_INT_ERROR; 256x144 removes that wrap.
-     * IMPORTANT: both dimensions MUST be multiples of 16. The MP is a flexa
-     * channel read by the GPU in 16-line segments and is H.264-encoded in
-     * 16x16 macroblocks; a non-16 height (e.g. 360) corrupts the flexa/encode
-     * frame buffers and asserts in bk_mem_slab_free. 256/16=16, 144/16=9.
-     * The downlink decoder is configured to the same size for the loopback. */
-    camera_board.isp.mp_width = 256;
-    camera_board.isp.mp_height = 144;
+    /* Uplink encode source = ISP MP. 1280x720 (16:9, 1.5x downscale of 1080p
+     * sensor) for phone-side HD preview. Both dimensions MUST be multiples of
+     * 16 (720/16=45 FLEXA rows). Downlink decode uses the same 720p class size
+     * but is a separate h264d path (shallow DL_SEG_NUM ring); SP stays low-res
+     * for the local PIP self-view only. */
+    camera_board.isp.mp_width = 1280;
+    camera_board.isp.mp_height = 720;
     camera_board.isp.mp_format = BK_PIXEL_FORMAT_NV12;
     /* SP channel feeds the downlink PIP self-view (local camera small window).
-     * Enlarged to 640x360 to match the h264d_gpu_display_example PIP size (an
-     * exact 3x down-scale of the 1080p sensor, WeChat-style self-view). SP is a
-     * non-flexa channel (sp_flexa=false) so it is NOT bound by the 16-line
-     * flexa/H.264 macroblock rule that MP has: only the WIDTH must be 16-aligned
-     * for GPU/DMA stride (640/16=40) and both dims must be even for NV12 4:2:0
-     * (360 is even). MUST stay equal to DL_PIP_WIDTH/HEIGHT in
-     * doorbell_downlink_video.c. */
+     * Reduced to 320x180 (was 640x360): with the concurrent dual-720p pipeline
+     * the 640x360@15fps self-view overloaded the GPU compositor / PSRAM bandwidth
+     * and caused downlink frame drops. 320x180 is 1/4 the pixels -> ~4x lighter
+     * SP write + PIP blit, self-view frame rate unchanged. SP is a non-flexa
+     * channel (sp_flexa=false) so it is NOT bound by the 16-line flexa/H.264
+     * macroblock rule that MP has: only the WIDTH must be 16-aligned for GPU/DMA
+     * stride (320/16=20) and both dims must be even for NV12 4:2:0 (180 is even).
+     * MUST stay equal to DL_PIP_WIDTH/HEIGHT in doorbell_downlink_video.c. */
     camera_board.isp.sp_enable = true;
     camera_board.isp.sp_flexa = false;
-    camera_board.isp.sp_width = 640;
-    camera_board.isp.sp_height = 360;
+    camera_board.isp.sp_width = 320;
+    camera_board.isp.sp_height = 180;
     camera_board.isp.sp_format = BK_PIXEL_FORMAT_NV12;
     display_board.mipi.enable = true;
     display_board.mipi.pin_reset = GPIO_60;
@@ -91,11 +83,11 @@ int main(void)
 
     gpu_board.flexa.enable = true;
     gpu_board.flexa.degree = 90;
-    /* Preview src follows ISP MP (256x144); dst stays panel pre-rotation
-     * 1920x1080, so the preview GPU scales 256x144 -> 1080P before the 90deg
+    /* Preview src follows ISP MP (1280x720); dst stays panel pre-rotation
+     * 1920x1080, so the preview GPU scales 720p -> 1080P before the 90deg
      * rotation. Must match camera_board.isp.mp_width/height (both /16). */
-    gpu_board.flexa.src_width = 256;
-    gpu_board.flexa.src_height = 144;
+    gpu_board.flexa.src_width = 1280;
+    gpu_board.flexa.src_height = 720;
     gpu_board.flexa.dst_width = 1920;
     gpu_board.flexa.dst_height = 1080;
     gpu_board.flexa.src_format = BK_PIXEL_FORMAT_NV12;

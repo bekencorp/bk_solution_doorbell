@@ -192,6 +192,19 @@ bk_err_t doorbell_jsonrpc_send_notify(const char *method, void *params)
     return db_rpc_send_json(root);
 }
 
+bk_err_t doorbell_notify_request_keyframe(const char *reason, const char *image_format)
+{
+    cJSON *params = cJSON_CreateObject();
+    if (params == NULL)
+    {
+        return BK_FAIL;
+    }
+    cJSON_AddStringToObject(params, "reason", (reason != NULL) ? reason : "frameLoss");
+    cJSON_AddStringToObject(params, "imageFormat", (image_format != NULL) ? image_format : "h264");
+    /* send_notify takes ownership of params. */
+    return doorbell_jsonrpc_send_notify("doorbell.notify.requestKeyFrame", params);
+}
+
 static void db_rpc_dispatch_request(const char *method, cJSON *params, cJSON *id)
 {
     uint32_t i;
@@ -241,9 +254,6 @@ void doorbell_jsonrpc_handle_cmd(const char *json, uint32_t length)
         params = cJSON_GetObjectItem(root, "params");
         id = cJSON_GetObjectItem(root, "id");
         LOGD("%s: method=%s%s\n", __func__, method->valuestring, id ? " (request)" : " (notify)");
-        /* #region agent log (debug 7ee2d5) */
-        LOGI("[DBG7ee2d5][hyp-ALL] RX len=%u raw=%s\n", (unsigned)length, json);
-        /* #endregion */
         db_rpc_dispatch_request(method->valuestring, params, id);
     }
     else
