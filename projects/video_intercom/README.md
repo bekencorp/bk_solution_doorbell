@@ -149,21 +149,49 @@ components/smart_intercom
 
 ### 5.1 Architecture
 
+```mermaid
+flowchart TB
+    subgraph DEV["BK7259 device"]
+        subgraph CP["CP (M52) connectivity and keepalive framework"]
+            CP_BOOT["System boot / powerctrl\nAP power on/off"]
+            CP_NET["Wi-Fi stack\nnetwork connection / DHCP / TCP/IP"]
+            CP_BT["Bluetooth / BLE\nprovisioning / link maintenance"]
+            CP_KEEP["Keepalive\nTCP heartbeat / low-power keepalive / AP wakeup"]
+            CP_IPC["db_ipc_msg\nAP↔CP message routing"]
+            CP_BOOT --> CP_NET
+            CP_BOOT --> CP_BT
+            CP_NET --> CP_KEEP
+            CP_BT --> CP_KEEP
+            CP_KEEP --> CP_IPC
+        end
+
+        subgraph AP["AP (M55) multimedia and AI application framework"]
+            AP_CTRL["Control plane\nJSON-RPC / camera / audio / lcd / imageStream"]
+            AP_CAP["Audio/video capture\nMIPI/UVC camera / Mic"]
+            AP_MEDIA["Media processing\nISP / JPEG/H.264 codec / GPU / LCD"]
+            AP_AI["AI detection\nhuman detection / pet detection"]
+            AP_REC["Recording\nvideo recording / audio recording / snapshot"]
+            AP_STREAM["Cloud storage and streaming\nlive video / cloud upload / event report"]
+            AP_CTRL --> AP_CAP
+            AP_CAP --> AP_MEDIA
+            AP_MEDIA --> AP_AI
+            AP_MEDIA --> AP_REC
+            AP_AI --> AP_REC
+            AP_AI --> AP_STREAM
+            AP_REC --> AP_STREAM
+        end
+    end
+
+    APP["APP / cloud service"] <-->|control commands / A/V data / cloud data| CP_NET
+    CP_IPC <-->|link status / keepalive event / AP wakeup / service vote| AP_CTRL
+    AP_STREAM -->|A/V stream / detection event / recording clip| CP_NET
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  AP (M55)                                                      │
-│  Uplink  : MIPI camera → ISP MP(256×144) → H.264 → network    │
-│  Downlink: network H.264 → slot → decode → FLEXA ring → GPU → LCD │
-│  PIP     : ISP SP(640×360) self-view → GPU blit top-right      │
-│  Control : JSON-RPC engine → camera/audio/lcd/imageStream fns  │
-│  Audio   : full-duplex (doorbell_common audio_device)         │
-└───────────────────────────┬──────────────────────────────────┘
-                            │ IPC (db_ipc_msg)
-┌───────────────────────────▼──────────────────────────────────┐
-│  CP (M52)                                                      │
-│  db_ipc_msg / keepalive (TCP heartbeat) / db_pack / powerctrl  │
-└──────────────────────────────────────────────────────────────┘
-```
+
+Responsibility split:
+
+- **CP** runs Wi-Fi, Bluetooth/BLE, TCP/IP connection maintenance, low-power keepalive, AP power control, and AP/CP IPC routing.
+- **AP** runs camera/microphone capture, ISP/codec/GPU/LCD, multimedia control, human/pet detection, video/audio recording, cloud storage streaming, and event reporting.
+- **AP and CP** exchange link status, keepalive events, AP wakeup/powerdown requests, and service votes through `db_ipc_msg`; CP owns the cloud/APP network entrance, and AP provides business payloads for CP to forward.
 
 ### 5.2 Uplink (local → network)
 

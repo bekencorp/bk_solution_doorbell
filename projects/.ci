@@ -1,5 +1,3 @@
 cd doorbell;./dbuild.sh make bk7259
 cd doorbell_lp;./dbuild.sh make bk7259
-cd ipc;./dbuild.sh make bk7259
-cd isp_h264_tuning;./dbuild.sh make bk7259
 cd video_intercom;./dbuild.sh make bk7259

@@ -149,21 +149,49 @@ components/smart_intercom
 
 ### 5.1 整体架构
 
+```mermaid
+flowchart TB
+    subgraph DEV["BK7259 设备端"]
+        subgraph CP["CP（M52）连接与保活框架"]
+            CP_BOOT["系统启动 / powerctrl\nAP 上下电控制"]
+            CP_NET["Wi-Fi 协议栈\n网络连接 / DHCP / TCP/IP"]
+            CP_BT["Bluetooth / BLE\n配网 / 连接维护"]
+            CP_KEEP["Keepalive\nTCP 心跳 / 低功耗保活 / 唤醒 AP"]
+            CP_IPC["db_ipc_msg\nAP↔CP 消息路由"]
+            CP_BOOT --> CP_NET
+            CP_BOOT --> CP_BT
+            CP_NET --> CP_KEEP
+            CP_BT --> CP_KEEP
+            CP_KEEP --> CP_IPC
+        end
+
+        subgraph AP["AP（M55）多媒体与 AI 业务框架"]
+            AP_CTRL["业务控制面\nJSON-RPC / camera / audio / lcd / imageStream"]
+            AP_CAP["音视频采集\nMIPI/UVC 摄像头 / Mic"]
+            AP_MEDIA["媒体处理\nISP / JPEG/H.264 编解码 / GPU / LCD"]
+            AP_AI["AI 检测\n人形检测 / 宠物检测"]
+            AP_REC["录像录音\n本地录像 / 音频录制 / 快照"]
+            AP_STREAM["云存与推流\n实时图传 / 云存上传 / 事件上报"]
+            AP_CTRL --> AP_CAP
+            AP_CAP --> AP_MEDIA
+            AP_MEDIA --> AP_AI
+            AP_MEDIA --> AP_REC
+            AP_AI --> AP_REC
+            AP_AI --> AP_STREAM
+            AP_REC --> AP_STREAM
+        end
+    end
+
+    APP["APP / 云端服务"] <-->|控制命令 / 音视频数据 / 云存数据| CP_NET
+    CP_IPC <-->|连接状态 / 保活事件 / AP 唤醒 / 业务投票| AP_CTRL
+    AP_STREAM -->|音视频流 / 检测事件 / 录像片段| CP_NET
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  AP（M55）                                                     │
-│  上行：MIPI 摄像头 → ISP MP(256×144) → H.264 编码 → 网络发送  │
-│  下行：网络 H.264 → 解码槽 → 硬解 → FLEXA 环 → GPU 合成 → LCD  │
-│  PIP ：ISP SP(640×360) 自拍 → GPU blit 叠加右上角             │
-│  控制：JSON-RPC 引擎 → camera/audio/lcd/imageStream 处理器     │
-│  音频：双向音频（doorbell_common audio_device）               │
-└───────────────────────────┬──────────────────────────────────┘
-                            │ IPC (db_ipc_msg)
-┌───────────────────────────▼──────────────────────────────────┐
-│  CP（M52）                                                     │
-│  db_ipc_msg / keepalive（TCP 心跳）/ db_pack / powerctrl       │
-└──────────────────────────────────────────────────────────────┘
-```
+
+职责边界：
+
+- **CP 侧**负责 Wi-Fi、Bluetooth/BLE、TCP/IP 连接维护、低功耗保活、AP 上下电与 AP/CP IPC 消息转发。
+- **AP 侧**负责摄像头/麦克风采集、ISP/编解码/GPU/LCD、多媒体业务控制、人形/宠物检测、录像录音、云存推流和事件上报。
+- **AP 与 CP**通过 `db_ipc_msg` 同步连接状态、保活事件、AP 唤醒/关闭请求和业务投票；云端/APP 的网络入口由 CP 维护，AP 输出业务数据给 CP 转发。
 
 ### 5.2 上行通路（本机 → 网络）
 
