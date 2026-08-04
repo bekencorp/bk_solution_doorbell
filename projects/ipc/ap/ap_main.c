@@ -1,5 +1,6 @@
 #include "bk_private/bk_init.h"
 #include <components/system.h>
+#include <components/log.h>
 #include <os/os.h>
 #include <components/shell_task.h>
 #include <components/bk_frame_buffer.h>
@@ -21,7 +22,7 @@ int main(void)
     bk_init();
     media_service_init();
 
-    bk_printf("M55 main running...\r\n");
+    BK_LOGI(NULL, "AP main running...\r\n");
 
     camera_board_config_t camera_board = {0};
 
