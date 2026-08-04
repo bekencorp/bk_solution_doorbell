@@ -1,0 +1,61 @@
+menu "Boot Video Player"
+
+    config BOOT_VIDEO_PLAYER
+        bool "Enable boot video player (boot animation)"
+        default n
+        select AVI_PLAYER
+        select BK_VIDEO_PLAYER_ENABLE_AVI_PARSER
+        select BK_VIDEO_PLAYER_ENABLE_HW_JPEG_VIDEO_DECODER
+        help
+            Play a boot animation video once at power-up, based on the
+            bk_video_player engine. Enabling this auto-selects only the
+            mandatory, low-footprint parts: the AVI parser and the HW JPEG
+            decoder (AVI + MJPEG boot videos work out of the box).
+
+            The MP4 container, H.264 video and AAC audio are optional and
+            flash-heavy; the component code supports them, but they are only
+            linked in when the corresponding engine options are enabled in the
+            project defconfig (mind the app flash budget):
+              CONFIG_BK_VIDEO_PLAYER_ENABLE_MP4_PARSER=y
+              CONFIG_BK_VIDEO_PLAYER_ENABLE_HW_H264_VIDEO_DECODER=y
+              CONFIG_BK_VIDEO_PLAYER_ENABLE_AAC_AUDIO_DECODER=y
+
+    config BOOT_VIDEO_TASK_PRIORITY
+        int "Boot video worker task priority"
+        default 4
+        depends on BOOT_VIDEO_PLAYER
+
+    config BOOT_VIDEO_TASK_STACK_SIZE
+        int "Boot video worker task stack size (bytes)"
+        default 4096
+        depends on BOOT_VIDEO_PLAYER
+
+    config BOOT_VIDEO_PA_CTRL_ENABLE
+        bool "Enable speaker PA control for boot video audio"
+        default y
+        depends on BOOT_VIDEO_PLAYER
+
+    config BOOT_VIDEO_PA_CTRL_GPIO
+        int "Speaker PA control GPIO"
+        default 29
+        depends on BOOT_VIDEO_PA_CTRL_ENABLE
+
+    config BOOT_VIDEO_PA_ON_LEVEL
+        int "Speaker PA active level (0/1)"
+        default 1
+        depends on BOOT_VIDEO_PA_CTRL_ENABLE
+
+    config BOOT_VIDEO_SD_DISCHARGE_MS
+        int "SD virtual re-plug discharge time (ms)"
+        default 1500
+        range 100 3000
+        depends on BOOT_VIDEO_PLAYER
+        help
+            After disabling SDIO CLK/CMD/DAT0 pull-ups on cold boot, wait this
+            long for the TF card to discharge below its POR threshold before
+            restoring pull-ups and mounting. On BK7259 QFN128 EVB (SD always
+            powered from VBAT), 250 ms and 800 ms were insufficient; 1500 ms
+            cold-boot verified. Tune down gradually and cold-boot test after
+            each change.
+
+endmenu

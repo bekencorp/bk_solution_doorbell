@@ -23,6 +23,44 @@
 #include "doorbell_ipc_msg.h"
 #include "doorbell_keepalive.h"
 #include "doorbell_selftest.h"
+#if CONFIG_BOOT_VIDEO_PLAYER
+#include "boot_video_player.h"
+#endif
+#if CONFIG_BOOT_IMAGE_PLAYER
+#include "boot_image_player.h"
+
+/* Boot-image LCD bring-up adapter (see boot_image_player DESIGN_REVIEW §8, A1):
+ * the component stays decoupled from multimedia_device_service and reaches the
+ * panel only through these callbacks, which forward to the single display owner
+ * (app_display) the business UI also uses. */
+static bk_err_t boot_img_lcd_open(void *user, bk_display_ctlr_handle_t *out_handle)
+{
+    (void)user;
+    if (app_mipi_lcd_turn_on(app_display_board_config_get()) != BK_OK)
+    {
+        return BK_FAIL;
+    }
+    bk_display_ctlr_handle_t handle = (bk_display_ctlr_handle_t)app_mipi_lcd_handle_get();
+    if (handle == NULL)
+    {
+        return BK_FAIL;
+    }
+    *out_handle = handle;
+    return BK_OK;
+}
+
+static bk_err_t boot_img_lcd_close(void *user)
+{
+    (void)user;
+    return app_mipi_lcd_turn_off();
+}
+
+static const boot_image_display_ops_t s_boot_img_ops = {
+    .lcd_open  = boot_img_lcd_open,
+    .lcd_close = boot_img_lcd_close,
+    .user      = NULL,
+};
+#endif
 
 int main(void)
 {
@@ -106,6 +144,34 @@ int main(void)
     app_camera_board_config_set(&camera_board);
     app_display_board_config_set(&display_board);
     app_gpu_board_config_set(&gpu_board);
+
+    /* Boot display: async, non-blocking. The component owns the LCD during
+     * display and turns it off when done. file_path is provided by the upper
+     * layer (SD card /sd0 or internal flash /if0). The boot image and the boot
+     * animation are mutually exclusive; prefer the image when both are enabled. */
+#if CONFIG_BOOT_IMAGE_PLAYER
+    {
+        boot_image_play_cfg_t boot_img_cfg = {0};
+        boot_img_cfg.file_path           = "/sd0/boot.jpg";
+        boot_img_cfg.format              = BOOT_IMAGE_FORMAT_AUTO;
+        boot_img_cfg.display_duration_ms = 5000; /* hold 5s, then auto turn off */
+        boot_img_cfg.display_mode        = BOOT_IMAGE_DISPLAY_ON_OFF;
+        boot_img_cfg.display_ops         = &s_boot_img_ops;
+        /* Boot image must be authored at panel native size (HX8399C 1080x1920). */
+        boot_img_cfg.panel_width         = 1080;
+        boot_img_cfg.panel_height        = 1920;
+        boot_image_show(&boot_img_cfg);
+    }
+#elif CONFIG_BOOT_VIDEO_PLAYER
+    {
+        boot_video_play_cfg_t boot_cfg = {0};
+        boot_cfg.file_path     = "/sd0/boot.mp4";
+        boot_cfg.rotate_degree = BOOT_VIDEO_ROTATE_AUTO;
+        boot_cfg.volume        = 80;
+        boot_cfg.display_mode  = BOOT_VIDEO_DISPLAY_ON_OFF;
+        boot_video_play(&boot_cfg);
+    }
+#endif
 
     /* Debug config for Multimedia */
     avdk_monitor_init();

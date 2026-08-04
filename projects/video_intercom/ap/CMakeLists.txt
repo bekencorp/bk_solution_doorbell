@@ -17,6 +17,8 @@ set(priv_req
     bk_wifi_driver
     bk_peripheral
     lcd_device
+    boot_video_player
+    boot_image_player
 )
 
 armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" PRIV_REQUIRES "${priv_req}")

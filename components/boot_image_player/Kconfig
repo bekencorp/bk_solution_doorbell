@@ -1,0 +1,39 @@
+menu "Boot Image Player"
+
+    config BOOT_IMAGE_PLAYER
+        bool "Enable boot image player (boot splash image)"
+        default n
+        select BK_DECODER
+        help
+            Show a boot splash image (JPEG) once at power-up, read from VFS
+            (/sd0 SD card or /if0 internal flash). The image is decoded by the
+            hardware JPEG decoder (bk_decoder / vcdec) and flushed to the LCD
+            once as raw NV12. No rotation/scaling is performed: author the boot
+            image at the panel's native resolution and orientation.
+
+            Independent from boot_video_player; the two are mutually exclusive
+            at boot (the upper layer picks one).
+
+    config BOOT_IMAGE_TASK_PRIORITY
+        int "Boot image worker task priority"
+        default 4
+        depends on BOOT_IMAGE_PLAYER
+
+    config BOOT_IMAGE_TASK_STACK_SIZE
+        int "Boot image worker task stack size (bytes)"
+        default 4096
+        depends on BOOT_IMAGE_PLAYER
+
+    config BOOT_IMAGE_SD_DISCHARGE_MS
+        int "SD virtual re-plug discharge time (ms)"
+        default 1500
+        range 100 3000
+        depends on BOOT_IMAGE_PLAYER
+        help
+            After disabling SDIO CLK/CMD/DAT0 pull-ups on cold boot, wait this
+            long for the TF card to discharge below its POR threshold before
+            restoring pull-ups and mounting. Same origin/experience value as
+            boot_video_player (CONFIG_BOOT_VIDEO_SD_DISCHARGE_MS). On BK7259
+            QFN128 EVB (SD always powered from VBAT), 1500 ms cold-boot verified.
+
+endmenu
