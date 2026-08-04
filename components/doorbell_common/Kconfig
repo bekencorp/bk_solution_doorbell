@@ -36,7 +36,7 @@ menu "Doorbell Common"
             bool "Fixed QP: bitrate off, I=21, P=26"
 
         config H264_QP_PRESET_BALANCED
-            bool "Balanced: 1.5Mbps, I[22,42], P[26,44]"
+            bool "Balanced: 1.5Mbps, I[20,51], P[26,51]"
 
         config H264_QP_PRESET_ANTI_STUTTER
             bool "Anti-stutter: 1.2Mbps, I[24,45], P[28,48]"

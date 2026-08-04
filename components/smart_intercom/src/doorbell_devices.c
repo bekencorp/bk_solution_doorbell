@@ -87,10 +87,10 @@ static bk_err_t doorbell_apply_h264_qp_preset(void *encode_handle)
 #elif CONFIG_H264_QP_PRESET_BALANCED
     preset_name = "balanced";
     rate_ctrl.bitrate = 1500000;
-    rate_ctrl.qp_min_i = 22;
-    rate_ctrl.qp_max_i = 42;
+    rate_ctrl.qp_min_i = 20;
+    rate_ctrl.qp_max_i = 51;
     rate_ctrl.qp_min_p = 26;
-    rate_ctrl.qp_max_p = 44;
+    rate_ctrl.qp_max_p = 51;
 #elif CONFIG_H264_QP_PRESET_ANTI_STUTTER
     preset_name = "anti-stutter";
     rate_ctrl.bitrate = 1200000;
