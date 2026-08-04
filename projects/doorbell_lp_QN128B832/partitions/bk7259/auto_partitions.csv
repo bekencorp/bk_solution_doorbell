@@ -1,0 +1,13 @@
+# The bin size whose type is code occupies more space in flash,,,,,
+# The occupied space is: bin size*34/32(and 68K aligned),,,,,
+FLASH_CAPACITY=8M
+#Name,Offset,Size,Type,Read,Write
+primary_bootloader,,64k,code,TRUE,FALSE
+primary_cp_app,,1360k,code,TRUE,FALSE
+primary_ap_app,,2040k,code,TRUE,FALSE
+ota,,2040K,data,TRUE,TRUE
+usr_config,,60K,data,TRUE,TRUE
+easyflash,,8K,data,TRUE,TRUE
+easyflash_ap,,8K,data,TRUE,TRUE
+sys_rf,0x7FE000,4k,data,TRUE,TRUE
+sys_net,0x7FF000,4k,data,TRUE,TRUE

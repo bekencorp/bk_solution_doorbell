@@ -1,0 +1,1 @@
+./dbuild.sh make bk7259 PROJECT=doorbell_lp_QN128B832
