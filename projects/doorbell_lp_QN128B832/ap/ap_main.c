@@ -52,7 +52,7 @@ int main(void)
     camera_board.isp.sp_enable = false;
     camera_board.isp.sp_flexa = false;
     display_board.mipi.enable = true;
-    display_board.mipi.pin_reset = GPIO_60;
+    display_board.mipi.pin_reset = GPIO_55;
     display_board.mipi.pin_backlight = GPIO_7;
     display_board.mipi.panel = &lcd_device_hx8399c_mipi_1080x1920;
     display_board.dpu_video.enable = true;
