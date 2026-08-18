@@ -31,8 +31,8 @@
  * or update here directly before/without iTest
  */
 float target_pwr_ble  = 6.0; //2G4 BLE target power
-float target_pwr_thread = 10.0; //2.4G Thread target power (802.15.4 ch11-26)
 float target_polar_pwr_ble = 2.0; //2G4 BLE Polar target power
+float target_pwr_thread = 10.0; //2.4G Thread target power (802.15.4 ch11-26)
 float target_pwr_11b  = 18.0; //2G4 11B target power
 float target_pwr_11g  = 16.0; //2G4 11G target power
 float target_pwr_n20  = 15.0; //2G4 N20 target power
@@ -44,15 +44,15 @@ float target_pwr_ax20 = 15.0; //2G4 N20 target power
  * 0.25dB for 1 LSB
  * used for generate n/ax power table with g/a
  */
-int8_t g_dif_g_n20      = 4;  //differ between g and n20
-int8_t g_dif_g_ax20     = 4; //differ between g and ax20
-int8_t g_dif_g_n40      = 2; //differ between g and n40
-int8_t g_dif_g_ble_ch0  = -14;
-int8_t g_dif_g_ble_ch19 = -13;
-int8_t g_dif_g_ble_ch39 = -12;
-int8_t g_dif_g_thread_ch11 = 37;  //differ between g and thread
-int8_t g_dif_g_thread_ch19 = 40;
-int8_t g_dif_g_thread_ch26 = 38;
+int8_t g_dif_g_n20         = 4;  //differ between g and n20
+int8_t g_dif_g_ax20        = 4; //differ between g and ax20
+int8_t g_dif_g_n40         = 2; //differ between g and n40
+int8_t g_dif_g_ble_ch0     = -8;
+int8_t g_dif_g_ble_ch19    = -7;
+int8_t g_dif_g_ble_ch39    = -7;
+int8_t g_dif_g_thread_ch11 = 44;  //differ between g and thread
+int8_t g_dif_g_thread_ch19 = 45;
+int8_t g_dif_g_thread_ch26 = 44;
 /**
  * shift power index of all format:
  * 0.25dB for 1 LSB
@@ -313,9 +313,9 @@ const TXPWR_CAL_ST gtxpwr_tab_def_g[TXPWR_CAL_2G_MAX] = {
 };
 
 const TXPWR_CAL_ST gtxpwr_tab_def_ble[TXPWR_CAL_2G_MAX] = {
-    INIT_TXPWR_VALUE(1,  51),  // ch0 2402  inused
-    INIT_TXPWR_VALUE(20, 47),  // ch19 2440 inused
-    INIT_TXPWR_VALUE(40, 46),  // ch39 2480 inused
+    INIT_TXPWR_VALUE(1,  98),  // ch0 2402  inused
+    INIT_TXPWR_VALUE(20, 98),  // ch19 2440 inused
+    INIT_TXPWR_VALUE(40, 99),  // ch39 2480 inused
 };
 
 const TXPWR_CAL_ST gtxpwr_tab_def_polar_ble[TXPWR_CAL_2G_MAX] = {
@@ -326,9 +326,9 @@ const TXPWR_CAL_ST gtxpwr_tab_def_polar_ble[TXPWR_CAL_2G_MAX] = {
 
 /* IEEE 802.15.4 2.4G logical ch 11/19/26 (align g_dif_g_thread_ch*); same strip count as BLE/WiFi 2G */
 const TXPWR_CAL_ST gtxpwr_tab_def_thread[TXPWR_CAL_2G_MAX] = {
-    INIT_TXPWR_VALUE(11,54), //ch11
-    INIT_TXPWR_VALUE(19,54), //ch19
-    INIT_TXPWR_VALUE(26,57), //ch26
+    INIT_TXPWR_VALUE(11,48), //ch11
+    INIT_TXPWR_VALUE(19,48), //ch19
+    INIT_TXPWR_VALUE(26,50), //ch26
 };
 /****************************** temperature table  ****************************/
 const TMP_PWR_ST tmp_pwr_tab[TMP_PWR_TAB_LEN] = {
