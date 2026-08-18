@@ -83,6 +83,11 @@ static display_ctx_t *s_disp_ctx = NULL;
 static beken_mutex_t  s_disp_mutex = NULL;
 static display_board_config_t *s_display_board_config = NULL;
 
+/* Number of live owners of s_disp_ctx. The boot media player and the business
+ * UI both share this single display context; a turn_off from one owner must not
+ * tear the panel down while another owner is still using it. */
+static uint32_t s_disp_refcount = 0;
+
 static bool app_display_state_is_on(const display_ctx_t *ctx)
 {
     return (ctx != NULL) && (ctx->state == APP_DISPLAY_STATE_ON) && (ctx->ctlr != NULL);
@@ -271,6 +276,17 @@ int app_mipi_lcd_turn_off(void)
         return BK_FAIL;
     }
 
+    /* Balanced against every app_mipi_lcd_turn_on(): only the last owner to
+     * release actually tears the panel down. This stops the boot media player's
+     * post-playback turn_off from destroying the context the business UI just
+     * acquired (which left the downlink compositor flushing to a NULL ctx). */
+    if (s_disp_refcount > 1) {
+        s_disp_refcount--;
+        app_display_unlock();
+        return BK_OK;
+    }
+    s_disp_refcount = 0;
+
     ctx->state = APP_DISPLAY_STATE_TURNING_OFF;
 
     s_disp_ctx = NULL;
@@ -305,6 +321,11 @@ int app_mipi_lcd_turn_on(display_board_config_t *config)
         if (s_disp_ctx->state != APP_DISPLAY_STATE_ON) {
             LOGE("%s, display state is invalid: %d\n", __func__, s_disp_ctx->state);
             ret = BK_FAIL;
+        } else {
+            /* Second owner (e.g. business UI acquiring the panel while the boot
+             * media player still holds it): take a reference instead of a no-op
+             * so a later turn_off from the first owner does not tear it down. */
+            s_disp_refcount++;
         }
         app_display_unlock();
         return ret;
@@ -387,6 +408,7 @@ int app_mipi_lcd_turn_on(display_board_config_t *config)
 
     ctx->state = APP_DISPLAY_STATE_ON;
     s_disp_ctx = ctx;
+    s_disp_refcount = 1;
     app_display_unlock();
     return BK_OK;
 
@@ -396,6 +418,7 @@ err:
         app_display_ctx_destroy(ctx);
         s_disp_ctx = NULL;
     }
+    s_disp_refcount = 0;
     (void)app_display_power_enable(false);
     app_display_unlock();
     LOGE("%s fail\n", __func__);
@@ -415,6 +438,7 @@ int app_mipi_lcd_flush(void *frame, avdk_err_t (*free_t)(void *args))
     }
 
     app_display_unlock();
+
     return ret;
 }
 

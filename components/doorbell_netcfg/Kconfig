@@ -1,0 +1,26 @@
+menu "Doorbell Network Config"
+
+	config DOORBELL_NETCFG
+		bool "Enable doorbell WiFi provisioning + auto-reconnect (SDK bk_network_provisioning)"
+		default n
+		depends on BK_NETWORK_PROVISIONING && BK_BLE_PROVISIONING && EASY_FLASH
+		help
+		  Adapt the AI solution's provisioning scheme to the video_intercom
+		  project: replace the legacy doorbell_boarding BLE transport with the
+		  SDK bk_ble_provisioning GATT service, while keeping all doorbell
+		  business (CS2 P2P, server-net-info, LAN UDP/TCP services) unchanged.
+
+		  This component provides the doorbell_boarding.h symbols
+		  (doorbell_boarding_init/event_notify*/operation_handle) backed by the
+		  SDK transport, so doorbell_core.c is untouched and doorbell_boarding.c
+		  is compiled out (guarded by !CONFIG_DOORBELL_NETCFG).
+
+		  Default reconnect: on boot bk_network_provisioning_init(BLE) reconnects
+		  from NV "d_network_id" when present (no advertising), otherwise starts
+		  BLE provisioning. The SDK persists credentials on the first successful
+		  GOT_IP4 so later boots reconnect automatically.
+
+		  Only enable this in the video_intercom project; other doorbell projects
+		  keep the legacy doorbell_boarding behavior.
+
+endmenu

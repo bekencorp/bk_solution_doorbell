@@ -16,6 +16,31 @@ menu "Video Intercom"
         depends on SMART_INTERCOM
         default n
 
+    choice
+        prompt "Downlink video target resolution"
+        depends on SMART_INTERCOM
+        default SMART_INTERCOM_DL_RES_720P
+        help
+            Selects the downlink (App -> device) H.264 target resolution the
+            solution is built for. The actual decode geometry is still negotiated
+            at runtime via doorbell.imageStream.setReceiveConfig; this choice only
+            drives (a) the resolution advertised in doorbell.solution.getConfig's
+            default template and (b) the coded access-unit slot capacity so the
+            selected resolution's key frames fit without being dropped.
+
+            720p keeps the stock library behavior and memory footprint. 1080p
+            raises the coded-AU cap for larger key frames and roughly doubles the
+            H.264 decoder recon pool (PSRAM MEM_SLAB_HEAP_UNCODED); review the
+            downlink slot count and PSRAM budget before shipping 1080p, especially
+            with the uplink camera and PIP running concurrently.
+
+        config SMART_INTERCOM_DL_RES_720P
+            bool "720p (1280x720)"
+
+        config SMART_INTERCOM_DL_RES_1080P
+            bool "1080p (1920x1080)"
+    endchoice
+
     config SMART_INTERCOM_DL_SLOT_COUNT
         int "Downlink decode ring slot count"
         depends on SMART_INTERCOM

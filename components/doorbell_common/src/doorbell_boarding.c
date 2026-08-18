@@ -45,6 +45,13 @@
 #define DOORBELL_LP_VERSION                    (2)
 #endif
 
+/* For the video_intercom project (CONFIG_DOORBELL_NETCFG) the BLE provisioning
+ * transport and all these symbols are provided by the doorbell_netcfg component
+ * backed by the SDK bk_network_provisioning. Compile this legacy implementation
+ * out there to avoid duplicate symbol definitions. Other doorbell projects keep
+ * this legacy doorbell_boarding transport unchanged. */
+#if !CONFIG_DOORBELL_NETCFG
+
 static doorbell_boarding_info_t *doorbell_boarding_info = NULL;
 #ifdef CONFIG_CS2_P2P_SERVER
 static p2p_cs2_key_t *p2p_cs2_key = NULL;
@@ -494,3 +501,5 @@ void doorbell_boarding_event_notify_with_data(uint16_t opcode, int status, char 
     LOGV("%s: %d, %d, %d\n", __func__, opcode, status, length);
     ble_boarding_notify(data, length + 5);
 }
+
+#endif /* !CONFIG_DOORBELL_NETCFG */

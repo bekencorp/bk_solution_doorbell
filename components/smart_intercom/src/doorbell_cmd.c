@@ -40,6 +40,12 @@
 
 #define DOORBELL_CMD_BUFFER (1460)
 
+/* Periodic heartbeat interval for the JSON-RPC control channel. Must not exceed
+ * the value advertised to the app in doorbell.session.setKeepAlive (intervalMs),
+ * otherwise the app's session keepalive watchdog times out and reconnects the
+ * cmd channel. Advertised value is 30000ms; send at that cadence. */
+#define DB_HEARTBEAT_INTERVAL_MS (30000)
+
 typedef struct
 {
     beken_timer_t timer;
@@ -49,21 +55,47 @@ typedef struct
 
 
 db_cmd_info_t *db_cmd_info = NULL;
+
+/* Forward declarations: heartbeat helpers are defined later but referenced by
+ * doorbell_transmission_device_power_on_notify() below. */
+int doorbell_keep_alive_start_timer(UINT32 time_ms);
+bk_err_t doorbell_cmd_server_init(void);
+
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
 static uint32_t mm_service_status = 0;
+
+/* Optional UI-mode hook, notified on the idle<->active edges of
+ * mm_service_status (see doorbell_mm_service_set_status_cb). */
+static doorbell_mm_status_cb_t s_mm_status_cb = NULL;
+static void *s_mm_status_cb_user = NULL;
+
+void doorbell_mm_service_set_status_cb(doorbell_mm_status_cb_t cb, void *user)
+{
+    s_mm_status_cb = cb;
+    s_mm_status_cb_user = user;
+}
 
 void doorbell_transmission_device_power_on_notify(void)
 {
     LOGI("Notify device power on to server\r\n");
     /* Control channel is JSON-framed: emit a JSON-RPC notification. */
     doorbell_jsonrpc_send_notify("doorbell.notify.powerOn", NULL);
+
+    /* Start the periodic heartbeat as soon as the control channel is up.
+     * Without this the device never emits doorbell.notify.heartbeat, so once
+     * the app stops sending commands (e.g. steady-state streaming) its session
+     * keepalive watchdog expires and it drops/reconnects the cmd channel. */
+    if (db_cmd_info == NULL)
+    {
+        doorbell_cmd_server_init();
+    }
+    doorbell_keep_alive_start_timer(DB_HEARTBEAT_INTERVAL_MS);
 }
 #endif
 
 static void doorbell_keep_alive_timer_handler(void *data)
 {
     (void)data;
-    LOGD("doorbell_keep_alive_timer_handler\n");
     doorbell_jsonrpc_send_notify("doorbell.notify.heartbeat", NULL);
 }
 
@@ -176,6 +208,7 @@ bk_err_t doorbell_cmd_server_deinit(void)
 uint32_t doorbell_mm_service_vote(mm_status_bit_t service_bit, bool vote_add)
 {
     uint32_t bit_mask = 0;
+    uint32_t prev_status = mm_service_status;
 
     switch (service_bit)
     {
@@ -221,6 +254,21 @@ uint32_t doorbell_mm_service_vote(mm_status_bit_t service_bit, bool vote_add)
     /* Central choke point: a newly active service (incl. LCD) turns ASR off. */
     doorbell_asr_arbitrate();
 #endif
+
+    /* Notify the local UI on the idle<->active edges so it can hand the panel to
+     * the two-way video-call pipeline when a call starts and take it back to the
+     * home screen when every feature is off. */
+    if (s_mm_status_cb)
+    {
+        if (prev_status == 0 && mm_service_status != 0)
+        {
+            s_mm_status_cb(true, s_mm_status_cb_user);
+        }
+        else if (prev_status != 0 && mm_service_status == 0)
+        {
+            s_mm_status_cb(false, s_mm_status_cb_user);
+        }
+    }
 
     return mm_service_status;
 }

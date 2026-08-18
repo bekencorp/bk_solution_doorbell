@@ -1,0 +1,51 @@
+# KCONFIG_GROUP: Device Drivers::Keys & Buttons
+menu "BK Key (generic button engine)"
+
+config BK_KEY
+	bool "Enable generic key component (bk_key)"
+	default n
+	select BUTTON
+	help
+	  Decoupled button engine. Reuses the SDK multi_button / adc_key
+	  drivers for detection and exposes device-agnostic (key_id, gesture)
+	  events through a publish-subscribe API. The component has zero
+	  business dependency: the mapping "which key does what" lives in the
+	  product layer (e.g. projects/<name>/ap/key_map.c).
+
+config BK_KEY_ADC
+	bool "Enable ADC (resistor-divider) keys"
+	depends on BK_KEY
+	select ADC_KEY
+	default n
+	help
+	  Route keys through the SDK adc_key resistor-ladder driver. Each key
+	  is one voltage window on a shared ADC channel; bk_key registers one
+	  detector item per window, so a single ADC line supports N keys
+	  (not limited to the SDK S4/S5 naming).
+
+config BK_KEY_ADC_CALIB
+	bool "ADC key voltage calibration logging (TEMPORARY)"
+	depends on BK_KEY_ADC
+	default n
+	help
+	  Spawn a sampling thread that periodically reads the shared ADC channel
+	  and prints the voltage whenever it changes. Use it once to read the
+	  real per-key voltages (and the idle baseline), fill the adc_v_low/high
+	  windows in the product key_map, then turn this OFF. Not for production.
+
+config BK_KEY_MAX_LISTENERS
+	int "Max subscribers"
+	depends on BK_KEY
+	default 4
+
+config BK_KEY_THREAD_PRIO
+	int "key dispatch thread priority"
+	depends on BK_KEY
+	default 4
+
+config BK_KEY_THREAD_STACK
+	int "key dispatch thread stack size (bytes)"
+	depends on BK_KEY
+	default 2048
+
+endmenu

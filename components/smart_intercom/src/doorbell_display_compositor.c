@@ -8,6 +8,7 @@
 #include <components/bk_gpu.h>
 #include <components/bk_isp_camera.h>
 #include <driver/isp_base.h>
+#include "modules/vg_lite_gpu/vg_lite.h"
 
 #include "app_display.h"
 #include "app_gpu.h"
@@ -47,6 +48,14 @@
  * broken PIP from ever starving the (higher-value) downlink decode/GPU path. */
 #define COMP_PIP_MAX_FAIL        30U
 #define COMP_PIP_FAIL_DELAY_MS   20U
+/* Decouple the self-view (PIP) refresh from the downlink frame rate: if no
+ * downlink main frame has been flushed for this long, the main picture is
+ * frozen, so the PIP task actively recomposes (frozen main background + a fresh
+ * SP frame) onto a spare out_pool buffer and flushes it. Kept above a healthy
+ * downlink frame interval so that, when downlink is fast enough, the normal
+ * in-pipeline PIP blit path (gpu_flex_data_frame_done) handles it and this
+ * supplemental refresh stays dormant. */
+#define COMP_PIP_IDLE_MS         50U
 
 typedef struct
 {
@@ -63,8 +72,23 @@ typedef struct
     comp_pool_entry_t out_pool[COMP_FRAME_POOL_COUNT];
     uint32_t out_pool_size;
     uint32_t out_pool_count;
+    /* Main display output geometry (mirrors the GPU controller's compressed-ARGB
+     * output), needed to describe the DPU-facing dst buffer to VG-Lite for the
+     * project-side PIP-only blit. out_disp_w/h are the 16-line-aligned output
+     * dims; out_rotate is the panel pre-rotation degree. */
+    uint16_t out_disp_w;
+    uint16_t out_disp_h;
+    uint8_t out_rotate;
     beken_semaphore_t display_release_sem;
     volatile uint32_t display_pushed;
+    /* The buffer the DPU is currently showing (last one flushed). It holds the
+     * most recent composed main picture and stays pinned (in_use, not recycled)
+     * until the next flush, so the idle PIP path can safely read it as the
+     * background source. */
+    void * volatile on_screen_frame;
+    /* rtos_get_time() (ms) of the last DOWNLINK main-frame flush; drives the
+     * "downlink idle" decision in the PIP task. Not updated by PIP-only flushes. */
+    volatile uint32_t last_downlink_flush_ms;
 
     /* PIP overlay (ISP SP self-view). */
     bool pip_enable;
@@ -155,6 +179,18 @@ static avdk_err_t comp_out_free(void *ptr)
 
     if (from_pool == 0U)
     {
+        /* The DPU is double-buffered: it defers a frame's release callback until
+         * the NEXT flush is committed. The compositor's last displayed frame thus
+         * keeps comp_dpu_release() latched in the DPU and it only fires when the
+         * next owner (LVGL) commits its first frame - i.e. AFTER the compositor was
+         * stopped and comp_out_pool_deinit() freed (and the slab recycled) that
+         * buffer to LVGL. Freeing it again here would corrupt LVGL's live buffer.
+         * s_comp.running is cleared at the very start of doorbell_compositor_stop(),
+         * so treat any free that reaches this point post-teardown as a no-op. */
+        if (s_comp.running == 0U)
+        {
+            return AVDK_ERR_OK;
+        }
         bk_frame_buffer_free(ptr);
     }
     return AVDK_ERR_OK;
@@ -218,12 +254,13 @@ static avdk_err_t comp_dpu_release(void *ptr)
     return AVDK_ERR_OK;
 }
 
-static void comp_frame_done(void *frame, uint32_t frame_size, void *args)
+/* Push a composed frame to the DPU. is_downlink distinguishes a real downlink
+ * main frame (updates the idle-detection timestamp) from a supplemental PIP-only
+ * refresh (must not, or the idle detection would never fire). On success the
+ * frame becomes the pinned on-screen buffer. */
+static void comp_display_push(void *frame, bool is_downlink)
 {
     int ret;
-
-    (void)frame_size;
-    (void)args;
 
     /* Back-pressure: don't outrun the DPU release rate. */
     if (s_comp.display_pushed >= COMP_DISPLAY_PRIME_COUNT &&
@@ -240,6 +277,18 @@ static void comp_frame_done(void *frame, uint32_t frame_size, void *args)
         return;
     }
     s_comp.display_pushed++;
+    s_comp.on_screen_frame = frame;
+    if (is_downlink)
+    {
+        s_comp.last_downlink_flush_ms = (uint32_t)rtos_get_time();
+    }
+}
+
+static void comp_frame_done(void *frame, uint32_t frame_size, void *args)
+{
+    (void)frame_size;
+    (void)args;
+    comp_display_push(frame, true);
 }
 
 /* ------------------------------------------------------------------ */
@@ -360,6 +409,159 @@ static void comp_pip_blit_free_cb(void *frame, void *args)
     }
 }
 
+/* True when the downlink main picture has not been flushed for COMP_PIP_IDLE_MS,
+ * i.e. it is frozen and the SDK in-pipeline PIP blit path (which only runs on a
+ * downlink frame_done) is dormant. */
+static bool comp_downlink_idle(void)
+{
+    return (uint32_t)((uint32_t)rtos_get_time() - s_comp.last_downlink_flush_ms) >= COMP_PIP_IDLE_MS;
+}
+
+/* Project-side PIP overlay blit (equivalent to the SDK's bk_gpu_blit_render /
+ * gpu_flex_data_frame_done_blit, kept here so the bk_gpu component stays stock).
+ *
+ * Blits one NV12 self-view frame (sp_frame) onto dst_bg, which already holds the
+ * frozen main picture in the DPU-facing compressed-ARGB layout. Runs under the
+ * GPU controller's own gpu_mutex (BK_GPU_IOCTL_LOCK) so it is serialized against
+ * the controller's flex worker VG-Lite usage - the controller shares a single
+ * VG-Lite instance which is not internally thread-safe. Does NOT flush; the
+ * caller pushes dst_bg to the display. */
+static avdk_err_t comp_pip_blit_overlay(void *dst_bg, void *sp_frame)
+{
+    vg_lite_buffer_t dst;
+    vg_lite_buffer_t src;
+    vg_lite_matrix_t m;
+    vg_lite_rectangle_t rect;
+    avdk_err_t ret = AVDK_ERR_OK;
+    int vret;
+
+    if (dst_bg == NULL || sp_frame == NULL || s_comp.gpu == NULL)
+    {
+        return AVDK_ERR_INVAL;
+    }
+
+    /* dst: DPU-facing compressed-ARGB output (BGRA8888 tiled DEC_HV_SAMPLE),
+     * width/height taken from the controller output dims with a 90/270 swap. */
+    os_memset(&dst, 0, sizeof(dst));
+    if (s_comp.out_rotate == 90U || s_comp.out_rotate == 270U)
+    {
+        dst.width  = s_comp.out_disp_h;
+        dst.height = s_comp.out_disp_w;
+    }
+    else
+    {
+        dst.width  = s_comp.out_disp_w;
+        dst.height = s_comp.out_disp_h;
+    }
+    dst.format        = VG_LITE_BGRA8888;
+    dst.tiled         = VG_LITE_TILED;
+    dst.compress_mode = VG_LITE_DEC_HV_SAMPLE;
+
+    /* src: local self-view NV12 frame (Y plane then interleaved UV at w*h). */
+    os_memset(&src, 0, sizeof(src));
+    src.width  = s_comp.pip_w;
+    src.height = s_comp.pip_h;
+    src.format = VG_LITE_NV12;
+
+    if (bk_gpu_ioctl(s_comp.gpu, BK_GPU_IOCTL_LOCK, NULL) != AVDK_ERR_OK)
+    {
+        return AVDK_ERR_GENERIC;
+    }
+
+    vg_lite_allocate_with_data(&src, sp_frame,
+                               (uint8_t *)sp_frame +
+                                   ((uint32_t)s_comp.pip_w * (uint32_t)s_comp.pip_h),
+                               NULL, NULL);
+    vg_lite_allocate_with_data(&dst, dst_bg, NULL, NULL, NULL);
+
+    os_memset(&m, 0, sizeof(m));
+    vg_lite_identity(&m);
+    switch (s_comp.pip_rotate)
+    {
+        case 90:
+            vg_lite_rotate(90.0f, &m);
+            m.m[0][2] = (vg_lite_float_t)s_comp.pip_dst_x + (vg_lite_float_t)s_comp.pip_h;
+            m.m[1][2] = (vg_lite_float_t)s_comp.pip_dst_y;
+            break;
+        case 180:
+            vg_lite_rotate(180.0f, &m);
+            m.m[0][2] = (vg_lite_float_t)s_comp.pip_dst_x + (vg_lite_float_t)s_comp.pip_w;
+            m.m[1][2] = (vg_lite_float_t)s_comp.pip_dst_y + (vg_lite_float_t)s_comp.pip_h;
+            break;
+        case 270:
+            vg_lite_rotate(270.0f, &m);
+            m.m[0][2] = (vg_lite_float_t)s_comp.pip_dst_x;
+            m.m[1][2] = (vg_lite_float_t)s_comp.pip_dst_y + (vg_lite_float_t)s_comp.pip_w;
+            break;
+        case 0:
+        default:
+            vg_lite_translate(s_comp.pip_dst_x, s_comp.pip_dst_y, &m);
+            break;
+    }
+
+    rect.x      = 0;
+    rect.y      = 0;
+    rect.width  = s_comp.pip_w;
+    rect.height = s_comp.pip_h;
+
+    /* Opaque copy of the SP rect (no alpha blend), matching the SDK PIP path. */
+    vret = vg_lite_blit_rect(&dst, &src, &rect, &m, VG_LITE_BLEND_NONE, 0, VG_LITE_FILTER_POINT);
+    if (vret != VG_LITE_SUCCESS)
+    {
+        LOGE("pip vg_lite_blit_rect failed=%d\n", vret);
+        ret = AVDK_ERR_GENERIC;
+    }
+    vg_lite_finish();
+
+    vg_lite_free_without_free_data(&dst);
+    vg_lite_free_without_free_data(&src);
+
+    (void)bk_gpu_ioctl(s_comp.gpu, BK_GPU_IOCTL_UNLOCK, NULL);
+    return ret;
+}
+
+/* Supplemental PIP refresh for the downlink-idle case.
+ *
+ * The in-pipeline PIP blit (gpu_flex_data_frame_done) only fires when a downlink
+ * main frame is composed, so a slow downlink drags the self-view down with it.
+ * When the main picture is frozen (comp_downlink_idle) recompose the just-read
+ * SP frame onto a copy of the on-screen main and flush it, keeping the self-view
+ * at its own ~SP rate.
+ *
+ * Memory: reuses out_pool (no dedicated background buffer). The on-screen frame
+ * stays pinned (in_use) while downlink is idle, so it is a safe memcpy source.
+ * The caller owns sp_frame and releases it after this returns. */
+static void comp_pip_idle_refresh(void *sp_frame)
+{
+    void *src;
+    void *bg;
+
+    src = s_comp.on_screen_frame;
+    if (src == NULL || s_comp.out_pool_size == 0U)
+    {
+        return; /* no composed main picture yet */
+    }
+
+    bg = comp_out_alloc(s_comp.out_pool_size);
+    if (bg == NULL)
+    {
+        return; /* no spare buffer this tick; skip (main picture keeps showing) */
+    }
+
+    /* Seed bg with the frozen main (carries a stale PIP region); the overlay blit
+     * then overwrites only the PIP rect with the fresh SP frame. */
+    os_memcpy(bg, src, s_comp.out_pool_size);
+
+    if (comp_pip_blit_overlay(bg, sp_frame) == AVDK_ERR_OK)
+    {
+        comp_display_push(bg, false);
+    }
+    else
+    {
+        (void)comp_out_free(bg);
+    }
+}
+
 static void comp_pip_task_entry(void *arg)
 {
     uint32_t push_count = 0U;
@@ -416,28 +618,46 @@ static void comp_pip_task_entry(void *arg)
         }
         fail_count = 0U;
 
-        os_memset(&blit, 0, sizeof(blit));
-        blit.src_x = 0U;
-        blit.src_y = 0U;
-        blit.src_width = s_comp.pip_w;
-        blit.src_height = s_comp.pip_h;
-        blit.src_format = BK_PIXEL_FORMAT_NV12;
-        blit.dst_x = s_comp.pip_dst_x;
-        blit.dst_y = s_comp.pip_dst_y;
-        blit.rotate_degree = s_comp.pip_rotate;
-        blit.args = NULL;
-        blit.free = comp_pip_blit_free_cb;
-
-        ret = bk_gpu_blit_set(s_comp.gpu, frame_buf, &blit);
-        if (ret != AVDK_ERR_OK)
+        if (comp_downlink_idle())
         {
-            LOGW("pip blit_set failed=%d, drop frame\n", (int)ret);
-            comp_pip_free(frame_buf);
-            rtos_delay_milliseconds(5U);
+            /* Downlink main picture is frozen: do a project-side PIP-only refresh
+             * (own the VG-Lite blit and the SP frame), decoupled from the SDK
+             * in-pipeline blit path so the self-view keeps its own ~SP rate. The
+             * SP frame is fully consumed within this iteration. */
+            comp_pip_idle_refresh(frame_buf);
+            /* Release the SP frame and post pip_release_sem with the same
+             * accounting the controller's free callback would use in the active
+             * path, so the top-of-loop backpressure stays balanced. */
+            comp_pip_blit_free_cb(frame_buf, NULL);
+            push_count++;
         }
         else
         {
-            push_count++;
+            /* Downlink active: hand the overlay to the GPU controller; the SDK
+             * flex worker composites it during the next downlink frame_done. */
+            os_memset(&blit, 0, sizeof(blit));
+            blit.src_x = 0U;
+            blit.src_y = 0U;
+            blit.src_width = s_comp.pip_w;
+            blit.src_height = s_comp.pip_h;
+            blit.src_format = BK_PIXEL_FORMAT_NV12;
+            blit.dst_x = s_comp.pip_dst_x;
+            blit.dst_y = s_comp.pip_dst_y;
+            blit.rotate_degree = s_comp.pip_rotate;
+            blit.args = NULL;
+            blit.free = comp_pip_blit_free_cb;
+
+            ret = bk_gpu_blit_set(s_comp.gpu, frame_buf, &blit);
+            if (ret != AVDK_ERR_OK)
+            {
+                LOGW("pip blit_set failed=%d, drop frame\n", (int)ret);
+                comp_pip_free(frame_buf);
+                rtos_delay_milliseconds(5U);
+            }
+            else
+            {
+                push_count++;
+            }
         }
     }
 
@@ -573,6 +793,14 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
         degree = 90U;
     }
 
+    /* Mirror the GPU controller's output geometry (bk_gpu_ctlr_default.c:
+     * output_width = compress ? align16(dst_width) : dst_width, output_height =
+     * align16(dst_height)); the compositor always runs compressed ARGB. Used to
+     * describe the DPU-facing dst buffer to VG-Lite in the PIP-only blit. */
+    s_comp.out_disp_w = (uint16_t)(((uint32_t)dst_w + 15U) & ~15U);
+    s_comp.out_disp_h = (uint16_t)(((uint32_t)dst_h + 15U) & ~15U);
+    s_comp.out_rotate = degree;
+
     if (s_comp.display_release_sem == NULL)
     {
         if (rtos_init_semaphore(&s_comp.display_release_sem, 1) != BK_OK)
@@ -585,6 +813,8 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
         (void)rtos_get_semaphore(&s_comp.display_release_sem, 0U);
     }
     s_comp.display_pushed = 0U;
+    s_comp.on_screen_frame = NULL;
+    s_comp.last_downlink_flush_ms = (uint32_t)rtos_get_time();
 
     /* The GPU compressed-ARGB output allocates height rounded up to 16 lines
      * (mirrors h264d_gpu_display_gpu_blit.c OUTPUT_HEIGHT). The pool buffer size
@@ -768,6 +998,13 @@ void doorbell_compositor_stop(void)
         s_comp.gpu = NULL;
     }
 
+    /* The DPU still holds the last displayed frame together with its
+     * comp_dpu_release callback (it releases a frame only when the NEXT flush is
+     * committed, which now comes from the next display owner, e.g. a rebuilt
+     * LVGL). That late release is made harmless by the s_comp.running == 0 guard
+     * in comp_out_free(): it skips the raw bk_frame_buffer_free() so the buffer
+     * this pool freed below (and the slab may have recycled to LVGL) is not
+     * double-freed -> avoids the "frame buffer overflow" assert. */
     comp_out_pool_deinit();
 
     if (s_comp.display_release_sem != NULL)
@@ -776,6 +1013,7 @@ void doorbell_compositor_stop(void)
         s_comp.display_release_sem = NULL;
     }
     s_comp.display_pushed = 0U;
+    s_comp.on_screen_frame = NULL;
     LOGI("compositor stopped\n");
 }
 

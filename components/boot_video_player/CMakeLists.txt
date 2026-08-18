@@ -13,7 +13,6 @@ set(reqs
     bk_gpu
     bk_frame_buffer
     media_service
-    multimedia_device_service
     bk_peripheral
     avdk_utils
     avdk_driver

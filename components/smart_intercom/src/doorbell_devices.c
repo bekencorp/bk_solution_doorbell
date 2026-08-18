@@ -1155,8 +1155,12 @@ bk_err_t doorbell_devices_start(uint16_t img_format)
         goto error;
     }
 
-    // need create task to read frame
-    bk_err_t ret = rtos_create_hsram_thread(&s_db_trans_cfg->transfer_thread,
+    /* Transfer task only reads encoded AUs from the PSRAM coded heap and pushes
+     * them over TCP; it touches no HSRAM/DMA buffers, so keep its stack in the
+     * regular (PSRAM) heap. This is deliberate: at 1080p downlink the HSRAM heap
+     * is nearly exhausted by the FLEXA ring + GPU + ISP SP + encoder, and an
+     * HSRAM stack here would fail to allocate (transfer_app_task init failed). */
+    bk_err_t ret = rtos_create_thread(&s_db_trans_cfg->transfer_thread,
                                 BEKEN_DEFAULT_WORKER_PRIORITY,
                                 "trs_task",
                                 (beken_thread_function_t)doorbell_devices_task_entry,

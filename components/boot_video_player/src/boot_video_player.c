@@ -47,7 +47,6 @@
 #include <components/bk_video_player/audio_decoder/bk_video_player_aac_decoder.h>
 #endif
 
-#include "app_display.h"
 #include "boot_video_player.h"
 #include "boot_video_priv.h"
 #include "boot_video_fs.h"
@@ -334,7 +333,7 @@ static void boot_video_teardown(bk_err_t result)
     {
         if (s_bv.cfg.display_mode == BOOT_VIDEO_DISPLAY_ON_OFF)
         {
-            (void)boot_video_lcd_close();
+            (void)boot_video_lcd_close(s_bv.cfg.display_ops);
         }
         else
         {
@@ -452,9 +451,11 @@ static void boot_video_task(void *arg)
         const bool audio_enabled = false;
 #endif
 
-        /* 3. resolve rotation from panel vs. video orientation */
-        uint16_t panel_w = 0, panel_h = 0;
-        (void)boot_video_lcd_get_size(&panel_w, &panel_h);
+        /* 3. resolve rotation from panel vs. video orientation. Panel geometry is
+         *    supplied by the caller (cfg.panel_width/height) so this component
+         *    does not depend on any display service for the panel size. */
+        uint16_t panel_w = s_bv.cfg.panel_width;
+        uint16_t panel_h = s_bv.cfg.panel_height;
         uint32_t rotate_degree = boot_video_resolve_rotate_degree(s_bv.cfg.rotate_degree,
                                                                   &info, panel_w, panel_h);
         boot_video_video_set_rotate_mode(boot_video_degree_to_mode(rotate_degree));
@@ -531,13 +532,11 @@ static void boot_video_task(void *arg)
             break;
         }
 
-        /* 6. turn LCD on + start display worker */
+        /* 6. turn LCD on + start display worker. Power/handle come from the
+         *    injected display ops; for ASSUME_ON the caller's lcd_open is expected
+         *    to be a no-op turn-on that just returns the handle. */
         boot_video_lcd_fmt_t lcd_fmt = boot_video_lcd_format_for_video_codec(info.video.format);
-        if (s_bv.cfg.display_mode == BOOT_VIDEO_DISPLAY_ASSUME_ON)
-        {
-            s_bv.ctx.lcd_handle = (bk_display_ctlr_handle_t)app_mipi_lcd_handle_get();
-        }
-        else if (boot_video_lcd_open_with_format(&s_bv.ctx.lcd_handle, lcd_fmt) != AVDK_ERR_OK)
+        if (boot_video_lcd_open_with_format(s_bv.cfg.display_ops, &s_bv.ctx.lcd_handle, lcd_fmt) != AVDK_ERR_OK)
         {
             BOOT_VIDEO_LOGE("%s: LCD open failed\n", __func__);
             break;
@@ -614,6 +613,11 @@ bk_err_t boot_video_play(const boot_video_play_cfg_t *cfg)
 {
     if (cfg == NULL || cfg->file_path == NULL || cfg->file_path[0] == '\0')
     {
+        return BK_ERR_PARAM;
+    }
+    if (cfg->display_ops == NULL || cfg->display_ops->lcd_open == NULL)
+    {
+        BOOT_VIDEO_LOGE("%s: display_ops (with lcd_open) is required\n", __func__);
         return BK_ERR_PARAM;
     }
     if (boot_video_lock_init() != AVDK_ERR_OK)

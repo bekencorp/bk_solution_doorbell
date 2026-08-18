@@ -3,6 +3,7 @@
 #include "cJSON.h"
 
 #include "doorbell_rpc_internal.h"
+#include "doorbell_downlink_video.h"
 
 #define TAG "db-rpc-sol"
 
@@ -179,8 +180,8 @@ static cJSON *p_image_set_recv_config(void)
         if (h264 != NULL) cJSON_Delete(h264);
         return p;
     }
-    cJSON_AddNumberToObject(h264, "width", 1280);
-    cJSON_AddNumberToObject(h264, "height", 720);
+    cJSON_AddNumberToObject(h264, "width", (int)DOORBELL_DL_MAIN_WIDTH);
+    cJSON_AddNumberToObject(h264, "height", (int)DOORBELL_DL_MAIN_HEIGHT);
     /* Downlink (phone -> device) capture rate negotiated with the App. Once the
      * App sends a clean contiguous IPPP stream (no mid-GOP encoded-frame drops),
      * decode is stable with no reference-chain breaks, so the rate can be raised

@@ -92,5 +92,21 @@ typedef enum
 
 uint32_t doorbell_mm_service_vote(mm_status_bit_t service_bit, bool vote_add);
 uint32_t doorbell_mm_service_get_status(void);
+
+/*
+ * UI-mode hook driven by the multimedia service status edges.
+ *
+ * A local-UI product (e.g. an LVGL home screen) must yield the LCD to the
+ * two-way video-call pipeline while a call is up and take it back when every
+ * feature is off. doorbell_mm_service_vote() aggregates the camera / audio / lcd
+ * votes, so it is the single choke point that knows when a call starts and ends:
+ *   - active = true  on the idle -> active edge (status goes 0 -> non-zero)
+ *   - active = false on the active -> idle edge (status goes non-zero -> 0)
+ *
+ * The callback runs on whatever thread called the vote (network / RPC thread);
+ * keep it light. Pass cb = NULL to unregister.
+ */
+typedef void (*doorbell_mm_status_cb_t)(bool active, void *user);
+void doorbell_mm_service_set_status_cb(doorbell_mm_status_cb_t cb, void *user);
 #endif
 #endif

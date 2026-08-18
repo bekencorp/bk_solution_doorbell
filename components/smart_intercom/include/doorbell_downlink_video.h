@@ -9,6 +9,21 @@
 extern "C" {
 #endif
 
+/*
+ * Compile-time downlink target resolution (Kconfig choice
+ * SMART_INTERCOM_DL_RES_720P / _1080P, default 720p). The runtime decode
+ * geometry still comes from the App via doorbell.imageStream.setReceiveConfig;
+ * these macros only drive the advertised getConfig default template and the
+ * resolution-dependent buffer sizing so the selected resolution is supported.
+ */
+#if defined(CONFIG_SMART_INTERCOM_DL_RES_1080P)
+#define DOORBELL_DL_MAIN_WIDTH   1920U
+#define DOORBELL_DL_MAIN_HEIGHT  1080U
+#else
+#define DOORBELL_DL_MAIN_WIDTH   1280U
+#define DOORBELL_DL_MAIN_HEIGHT  720U
+#endif
+
 /**
  * @brief Downlink H.264 receive configuration (from
  *        doorbell.imageStream.setReceiveConfig).
@@ -71,6 +86,18 @@ bool doorbell_downlink_video_is_running(void);
  * against a missing reference (macroblock mosaic on motion regions).
  */
 void doorbell_downlink_video_notify_ref_break(void);
+
+/**
+ * @brief Statistics hook: one complete H.264 access unit was received over WiFi.
+ *
+ * Called from the ready-queue producer (doorbell_downlink_ready_push), i.e. the
+ * single chokepoint shared by both the copy path (doorbell_downlink_video_recv)
+ * and the zero-copy path (doorbell_downlink_slot_fb_commit). Feeds the 1s WiFi
+ * receive frame-rate / bitrate counters printed by the downlink stats timer.
+ *
+ * @param bytes  Access-unit byte length.
+ */
+void doorbell_downlink_video_stats_on_recv(uint32_t bytes);
 
 /**
  * @brief Network video-channel producer: submit one received H.264 access unit.

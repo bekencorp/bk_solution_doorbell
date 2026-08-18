@@ -192,6 +192,10 @@ bk_err_t doorbell_downlink_ready_push(downlink_frame_t *frame)
     s_mgr.ready_count++;
     rtos_unlock_mutex(&s_mgr.lock);
 
+    /* Single chokepoint for a complete WiFi-received access unit (both the copy
+     * and zero-copy producers publish here): count it for the downlink stats. */
+    doorbell_downlink_video_stats_on_recv(frame->size);
+
     rtos_set_semaphore(&s_mgr.ready_sem);
     return BK_OK;
 }

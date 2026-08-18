@@ -38,7 +38,6 @@
 #include "modules/vg_lite_gpu/vg_lite.h"
 #include "soc/reg_base.h"
 
-#include "app_display.h"
 #include "boot_video_priv.h"
 #if CONFIG_BK_VIDEO_PLAYER_ENABLE_HW_H264_VIDEO_DECODER
 #include <components/bk_video_player/video_decoder/bk_video_player_hw_h264_decoder.h>
@@ -117,47 +116,34 @@ boot_video_lcd_fmt_t boot_video_lcd_format_for_video_codec(video_player_video_fo
     return BOOT_VIDEO_LCD_FMT_NV12_RAW;
 }
 
-bool boot_video_lcd_get_size(uint16_t *width, uint16_t *height)
-{
-    if (width == NULL || height == NULL)
-    {
-        return false;
-    }
-
-    *width = 0U;
-    *height = 0U;
-
-    display_board_config_t *board = app_display_board_config_get();
-    if (board == NULL || board->mipi.panel == NULL)
-    {
-        return false;
-    }
-
-    *width = board->mipi.panel->timing.h_size;
-    *height = board->mipi.panel->timing.v_size;
-
-    return (*width != 0U && *height != 0U);
-}
-
 avdk_err_t boot_video_lcd_apply_format(bk_display_ctlr_handle_t handle, boot_video_lcd_fmt_t fmt)
 {
     return boot_video_lcd_apply_video_format(handle, fmt);
 }
 
-avdk_err_t boot_video_lcd_open_with_format(bk_display_ctlr_handle_t *out_handle,
+avdk_err_t boot_video_lcd_open_with_format(const boot_video_display_ops_t *ops,
+                                           bk_display_ctlr_handle_t *out_handle,
                                            boot_video_lcd_fmt_t fmt)
 {
-    avdk_err_t ret = app_mipi_lcd_turn_on(app_display_board_config_get());
-    if (ret != AVDK_ERR_OK)
+    if (ops == NULL || ops->lcd_open == NULL)
     {
-        BOOT_VIDEO_LOGE("%s: app_mipi_lcd_turn_on failed, ret=%d\n", __func__, ret);
-        return ret;
+        BOOT_VIDEO_LOGE("%s: no display ops provided\n", __func__);
+        return AVDK_ERR_INVAL;
     }
 
-    bk_display_ctlr_handle_t handle = (bk_display_ctlr_handle_t)app_mipi_lcd_handle_get();
+    /* Panel power + controller-handle acquisition is delegated to the caller
+     * (dependency inversion), so this component does not depend on any board/app
+     * display service. The backing owner is expected to be idempotent. */
+    bk_display_ctlr_handle_t handle = NULL;
+    bk_err_t ret = ops->lcd_open(ops->user, &handle);
+    if (ret != BK_OK)
+    {
+        BOOT_VIDEO_LOGE("%s: ops->lcd_open failed, ret=%d\n", __func__, ret);
+        return AVDK_ERR_GENERIC;
+    }
     if (handle == NULL)
     {
-        BOOT_VIDEO_LOGE("%s: app_mipi_lcd_handle_get returned NULL\n", __func__);
+        BOOT_VIDEO_LOGE("%s: ops->lcd_open returned NULL handle\n", __func__);
         return AVDK_ERR_GENERIC;
     }
 
@@ -208,10 +194,17 @@ uint32_t boot_video_video_get_rotate_degree(void)
     return 0U;
 }
 
-avdk_err_t boot_video_lcd_close(void)
+avdk_err_t boot_video_lcd_close(const boot_video_display_ops_t *ops)
 {
     boot_video_lcd_runtime_format_reset();
-    return app_mipi_lcd_turn_off();
+
+    if (ops == NULL || ops->lcd_close == NULL)
+    {
+        /* Nothing to power down (KEEP_ON/ASSUME_ON never reach here, and a caller
+         * that omits lcd_close simply keeps the panel on). */
+        return AVDK_ERR_OK;
+    }
+    return (ops->lcd_close(ops->user) == BK_OK) ? AVDK_ERR_OK : AVDK_ERR_GENERIC;
 }
 
 /* ======================================================================== *

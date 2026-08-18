@@ -1,0 +1,6 @@
+menu "BK Factory Config"
+        config BK_FACTORY_CONFIG
+        depends on EASY_FLASH
+        bool "Enable BK factory config"
+        default n
+endmenu

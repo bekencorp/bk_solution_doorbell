@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <common/bk_err.h>
+#include <components/bk_display.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,8 +33,12 @@ extern "C" {
  *   - Media info is probed first, then only the required container parser /
  *     video decoder / audio decoder are registered. Audio output is opened
  *     only when the file actually contains an audio track.
- *   - The component turns the LCD on for playback and (by default) turns it off
- *     afterwards, leaving the business layer to turn it back on when ready.
+ *   - The component owns the pixel path (DPU runtime format, GPU rotate, frame
+ *     flush) but does NOT know how to bring up the panel itself: the LCD
+ *     power/handle is provided through boot_video_display_ops_t so the component
+ *     stays decoupled from any board/app display service. The same single owner
+ *     that runs the business display must back these callbacks. Whether the LCD
+ *     is turned off after playback is chosen by the caller via display_mode.
  *   - Playback runs on its own thread; boot_video_play() returns immediately.
  */
 
@@ -48,9 +53,9 @@ typedef enum
 /** Display power ownership during / after playback. */
 typedef enum
 {
-    BOOT_VIDEO_DISPLAY_ON_OFF = 0,   /**< Component turns LCD on, turns it off when done (default). */
-    BOOT_VIDEO_DISPLAY_KEEP_ON,      /**< Component turns LCD on, keeps it on when done. */
-    BOOT_VIDEO_DISPLAY_ASSUME_ON,    /**< Assume upper layer already turned the LCD on; never touch power. */
+    BOOT_VIDEO_DISPLAY_ON_OFF = 0,   /**< Turn LCD on (ops.lcd_open), turn it off on teardown (ops.lcd_close). Default. */
+    BOOT_VIDEO_DISPLAY_KEEP_ON,      /**< Turn LCD on (ops.lcd_open), keep it on after teardown (ops.lcd_close NOT called). */
+    BOOT_VIDEO_DISPLAY_ASSUME_ON,    /**< ops.lcd_open is expected to be a no-op turn-on (already on); ops.lcd_close NOT called. */
 } boot_video_display_mode_t;
 
 /** Let the component pick rotation from panel vs. video orientation. */
@@ -63,6 +68,26 @@ typedef enum
  */
 typedef void (*boot_video_done_cb_t)(bk_err_t result, void *user_data);
 
+/**
+ * @brief Injected LCD bring-up interface (dependency inversion).
+ *
+ * The component owns the pixel path (it sets the DPU runtime format, runs the
+ * GPU rotate and flushes via bk_display directly), but delegates the board/app
+ * specific panel power + controller-handle acquisition to the caller so it does
+ * not depend on any display service. The backing implementation MUST be the
+ * single owner of the display power domain (e.g. it forwards to the same app
+ * display service the business UI uses), so the boot animation and the business
+ * display never double-own the panel / power vote.
+ */
+typedef struct
+{
+    /** Turn the LCD on (idempotent) and return the bk_display controller handle. */
+    bk_err_t (*lcd_open)(void *user, bk_display_ctlr_handle_t *out_handle);
+    /** Turn the LCD off. Only invoked for BOOT_VIDEO_DISPLAY_ON_OFF. */
+    bk_err_t (*lcd_close)(void *user);
+    void      *user;                               /**< Opaque, passed back to lcd_open/lcd_close. */
+} boot_video_display_ops_t;
+
 /** Boot video playback configuration. */
 typedef struct
 {
@@ -71,6 +96,9 @@ typedef struct
     uint8_t                   volume;        /**< 0-100, only used when the file has audio. */
     bool                      mute;          /**< Only used when the file has audio. */
     boot_video_display_mode_t display_mode;  /**< Default BOOT_VIDEO_DISPLAY_ON_OFF. */
+    const boot_video_display_ops_t *display_ops; /**< LCD bring-up ops (required); must outlive the play. */
+    uint16_t                  panel_width;   /**< Panel width, used for AUTO rotation (0 = unknown, skip). */
+    uint16_t                  panel_height;  /**< Panel height, used for AUTO rotation (0 = unknown, skip). */
     boot_video_done_cb_t      done_cb;       /**< Optional completion callback. */
     void                     *user_data;     /**< Passed back to done_cb. */
 } boot_video_play_cfg_t;
@@ -99,10 +127,12 @@ bool boot_video_fs_is_mounted(boot_video_fs_t fs);
  *
  * Returns immediately. The filesystem for cfg->file_path is auto-mounted (by
  * path prefix) if needed, then a worker thread probes media info, registers the
- * required modules, turns on the LCD, plays, and cleans up (turning the LCD off
- * for BOOT_VIDEO_DISPLAY_ON_OFF).
+ * required modules, turns on the LCD (cfg->display_ops->lcd_open), plays, and
+ * cleans up (turning the LCD off via cfg->display_ops->lcd_close for
+ * BOOT_VIDEO_DISPLAY_ON_OFF).
  *
- * @param cfg Playback configuration (file_path must be a valid VFS path).
+ * @param cfg Playback configuration. file_path must be a valid VFS path and
+ *            display_ops (with a non-NULL lcd_open) must be provided.
  * @return BK_OK if the worker was started, BK_ERR_BUSY if already playing,
  *         BK_ERR_PARAM on invalid arguments.
  */

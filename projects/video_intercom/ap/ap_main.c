@@ -23,17 +23,30 @@
 #include "doorbell_ipc_msg.h"
 #include "doorbell_keepalive.h"
 #include "doorbell_selftest.h"
+#include "ui/doorbell_ui.h"
+#include "doorbell_netcfg.h"
+#include "components/bluetooth/bk_dm_bluetooth.h"
+#include "key_map.h"
+
+/* Firmware/protocol version advertised in the BLE provisioning Manufacturer
+ * Specific Data (BCD-style: 0x0100 = v1.0). Bump on protocol changes. */
+#define VIDEO_INTERCOM_FW_MAJOR 1
+#define VIDEO_INTERCOM_FW_MINOR 0
+#define VIDEO_INTERCOM_FW_PATCH 0
 #if CONFIG_BOOT_VIDEO_PLAYER
 #include "boot_video_player.h"
 #endif
 #if CONFIG_BOOT_IMAGE_PLAYER
 #include "boot_image_player.h"
+#endif
 
-/* Boot-image LCD bring-up adapter (see boot_image_player DESIGN_REVIEW §8, A1):
- * the component stays decoupled from multimedia_device_service and reaches the
- * panel only through these callbacks, which forward to the single display owner
- * (app_display) the business UI also uses. */
-static bk_err_t boot_img_lcd_open(void *user, bk_display_ctlr_handle_t *out_handle)
+#if CONFIG_BOOT_IMAGE_PLAYER || CONFIG_BOOT_VIDEO_PLAYER
+/* Boot-media LCD bring-up adapter (dependency inversion): the boot image/video
+ * components stay decoupled from multimedia_device_service and reach the panel
+ * only through these callbacks, which forward to the single display owner
+ * (app_display) the business UI also uses. Shared by both players since they are
+ * mutually exclusive at boot. */
+static bk_err_t boot_media_lcd_open(void *user, bk_display_ctlr_handle_t *out_handle)
 {
     (void)user;
     if (app_mipi_lcd_turn_on(app_display_board_config_get()) != BK_OK)
@@ -49,18 +62,37 @@ static bk_err_t boot_img_lcd_open(void *user, bk_display_ctlr_handle_t *out_hand
     return BK_OK;
 }
 
-static bk_err_t boot_img_lcd_close(void *user)
+static bk_err_t boot_media_lcd_close(void *user)
 {
     (void)user;
     return app_mipi_lcd_turn_off();
 }
+#endif
 
+#if CONFIG_BOOT_IMAGE_PLAYER
 static const boot_image_display_ops_t s_boot_img_ops = {
-    .lcd_open  = boot_img_lcd_open,
-    .lcd_close = boot_img_lcd_close,
+    .lcd_open  = boot_media_lcd_open,
+    .lcd_close = boot_media_lcd_close,
     .user      = NULL,
 };
 #endif
+
+#if CONFIG_BOOT_VIDEO_PLAYER
+static const boot_video_display_ops_t s_boot_video_ops = {
+    .lcd_open  = boot_media_lcd_open,
+    .lcd_close = boot_media_lcd_close,
+    .user      = NULL,
+};
+#endif
+
+/* Boot video/image completion -> the panel stays lit (KEEP_ON). Hand it straight
+ * to LVGL: the UI controller starts LVGL and selects the first screen (home when
+ * already provisioned, otherwise the provisioning/QR page). No screen-off in
+ * between so the switch to the UI is seamless. */
+static void video_intercom_boot_media_done(bk_err_t result, void *user_data)
+{
+    doorbell_ui_on_boot_media_done(result, user_data);
+}
 
 int main(void)
 {
@@ -152,13 +184,19 @@ int main(void)
         boot_image_play_cfg_t boot_img_cfg = {0};
         boot_img_cfg.file_path           = "/sd0/boot.jpg";
         boot_img_cfg.format              = BOOT_IMAGE_FORMAT_AUTO;
-        boot_img_cfg.display_duration_ms = 5000; /* hold 5s, then auto turn off */
-        boot_img_cfg.display_mode        = BOOT_IMAGE_DISPLAY_ON_OFF;
+        boot_img_cfg.display_duration_ms = 5000; /* hold 5s, then hand panel to LVGL */
+        /* Keep the panel lit after the boot image so LVGL can take over without a
+         * visible screen-off flicker (see doorbell_ui_on_boot_media_done). */
+        boot_img_cfg.display_mode        = BOOT_IMAGE_DISPLAY_KEEP_ON;
         boot_img_cfg.display_ops         = &s_boot_img_ops;
         /* Boot image must be authored at panel native size (HX8399C 1080x1920). */
         boot_img_cfg.panel_width         = 1080;
         boot_img_cfg.panel_height        = 1920;
-        boot_image_show(&boot_img_cfg);
+        boot_img_cfg.done_cb             = video_intercom_boot_media_done;
+        if (boot_image_show(&boot_img_cfg) != BK_OK)
+        {
+            video_intercom_boot_media_done(BK_FAIL, NULL);
+        }
     }
 #elif CONFIG_BOOT_VIDEO_PLAYER
     {
@@ -166,9 +204,23 @@ int main(void)
         boot_cfg.file_path     = "/sd0/boot.mp4";
         boot_cfg.rotate_degree = BOOT_VIDEO_ROTATE_AUTO;
         boot_cfg.volume        = 80;
-        boot_cfg.display_mode  = BOOT_VIDEO_DISPLAY_ON_OFF;
-        boot_video_play(&boot_cfg);
+        /* Keep the panel lit after the boot animation so LVGL can take over
+         * seamlessly (see doorbell_ui_on_boot_media_done). */
+        boot_cfg.display_mode  = BOOT_VIDEO_DISPLAY_KEEP_ON;
+        boot_cfg.display_ops   = &s_boot_video_ops;
+        /* Panel native geometry (HX8399C MIPI 1080x1920), used for AUTO rotation. */
+        boot_cfg.panel_width   = 1080;
+        boot_cfg.panel_height  = 1920;
+        boot_cfg.done_cb       = video_intercom_boot_media_done;
+        if (boot_video_play(&boot_cfg) != BK_OK)
+        {
+            /* Nothing will play -> panel is free now; unblock the QR UI. */
+            video_intercom_boot_media_done(BK_FAIL, NULL);
+        }
     }
+#else
+    /* No boot animation configured -> the panel is free right away. */
+    video_intercom_boot_media_done(BK_OK, NULL);
 #endif
 
     /* Debug config for Multimedia */
@@ -177,8 +229,27 @@ int main(void)
 
     devices_mgmt_init();
 
+    /* Init the local UI controller before provisioning kicks off in
+     * doorbell_core_init(), so it registers the provisioning status callback and
+     * catches the very first RUNNING/RECONNECT_* status. LVGL itself is not
+     * started here; it comes up once boot media finishes (see
+     * video_intercom_boot_media_done -> doorbell_ui_on_boot_media_done). */
+    doorbell_ui_init();
+
+    /* Provide the firmware version carried in the BLE provisioning advertisement
+     * BEFORE provisioning starts in doorbell_core_init(). The device type
+     * (INTERCOM) and the "BK_INTERCOM_<MAC3>" Local Name are handled inside the
+     * doorbell_netcfg component per the BLE provisioning adv spec. */
+    doorbell_netcfg_set_adv_fw_version(VIDEO_INTERCOM_FW_MAJOR,
+                                       VIDEO_INTERCOM_FW_MINOR,
+                                       VIDEO_INTERCOM_FW_PATCH);
+
 #if (defined(CONFIG_INTEGRATION_DOORBELL))
     bk_doorbell_config_init();
+    /* doorbell_core_init() calls doorbell_boarding_init(), which for this project
+     * (CONFIG_DOORBELL_NETCFG) is provided by the doorbell_netcfg component and
+     * brings up SDK bk_network_provisioning (BLE provisioning + default
+     * reconnect). No separate provisioning init call is needed here. */
     doorbell_core_init();
 #endif
 
@@ -191,5 +262,12 @@ int main(void)
     doorbell_keepalive_handle_wakeup_reason();
     //doorbell_keepalive_cli_init();
     doorbell_selftest_cli_init();
+
+    /* Physical keys (K3-K6 ADC ladder). Started last, after core services
+     * are up, so key handlers can safely call into them. No-op unless
+     * CONFIG_BK_KEY is enabled. */
+#if CONFIG_BK_KEY
+    doorbell_key_start();
+#endif
     return 0;
 }

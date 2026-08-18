@@ -29,6 +29,23 @@
  * exceed the HSRAM budget (~128KB alongside the GPU composite buffer).
  * Matches h264d_gpu_display_example (SEG_NUM=4 at 1280x720). */
 #define DL_SEG_NUM_SHALLOW   4U
+/* 1080p downlink shares the 512KB AP HSRAM heap with the concurrent uplink ISP
+ * SP channel (~90KB) + H.264 encoder (task + recon) + transfer task.
+ * Measured HSRAM budget for the 1080p ring:
+ *   seg=4 (180KB): post-dl free ~148KB -> encoder task fails (-12), min 1136B.
+ *   seg=3 (135KB): post-dl free ~198KB -> encoder OK; the last uplink task
+ *                  (trs_task, 4KB) originally overflowed HSRAM, now moved off
+ *                  HSRAM (see doorbell_devices_start) so the chain fits. Downlink
+ *                  decodes fine at seg=3.
+ *   seg=2 ( 90KB): HSRAM plenty, BUT the 1080p FLEXA H264 decode<->GPU bond
+ *                  needs >=3 ring segments: at seg=2 every frame hits
+ *                  "vcdec decode timeout irq_status=0x401" (decoder stalls
+ *                  waiting for the 2-segment ring to drain). Do NOT use 2.
+ * So 1080p uses seg=3 (the minimum that both decodes AND leaves HSRAM room once
+ * trs_task is off HSRAM). 720p keeps seg=4 (already has HSRAM headroom). */
+#define DL_SEG_NUM_SHALLOW_1080  3U
+/* Height (px) at/above which the 1080p-class shallow ring depth is used. */
+#define DL_SEG_1080_HEIGHT_MIN   1080U
 /* Full-frame ring budget: width * (16 * frame_segs) * 3/2 above this -> shallow. */
 #define DL_SEG_RING_BUDGET   (128U * 1024U)
 /* Downlink decode ring depth. Configurable via Kconfig (range 3..8, default 4);
@@ -47,8 +64,13 @@
  * owns the real buffer and ignores that hint. */
 #define DL_SLOT_CAPACITY_MIN (16U * 1024U)
 /* Max coded H.264 AU size (matches uplink encoder / mds_img_manager). At 720p
- * the raw NV12 frame is ~1.38MB but Annex-B access units are far smaller. */
-#ifndef CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER
+ * the raw NV12 frame is ~1.38MB but Annex-B access units are far smaller. For a
+ * 1080p downlink build the App's key frames (IDR) can exceed the 720p ~460KB
+ * cap, so give generous headroom to avoid dropping them; the 720p path keeps the
+ * stock cap derived from the uplink encoder Kconfig. */
+#if defined(CONFIG_SMART_INTERCOM_DL_RES_1080P)
+#define DL_H264_AU_CAP_MAX   (1024U * 1024U)
+#elif !defined(CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER)
 #define DL_H264_AU_CAP_MAX   (512U * 1024U)
 #else
 #define DL_H264_AU_CAP_MAX   ((uint32_t)CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER)
@@ -61,6 +83,11 @@
 
 #define DL_TASK_PRIORITY     3U
 #define DL_TASK_STACK        (1024U * 16U)
+
+/* Downlink runtime stats dump period. One line per second (matches the
+ * MONITOR / video-fps cadence) so a static on-screen picture can be diagnosed:
+ * wifi=0 -> not receiving, h264 ok=0 -> receiving but not decoding. */
+#define DL_STATS_DUMP_INTERVAL_MS 5000U
 
 /* Default local self-view (PIP) geometry. */
 /* PIP self-view window. Reduced to 320x180 (was 640x360) to cut the PIP
@@ -96,6 +123,24 @@ typedef struct
     beken_semaphore_t done_sem;
     uint8_t pip_deferred;  /* uplink+720p: PIP held until first decode succeeds */
     volatile uint8_t ref_break_pending; /* set on slot-starvation drop */
+
+    /* Runtime statistics. Counters are free-running cumulative and are bumped
+     * from the network producer (wifi_*) and the decode task (dec_*); the 1s
+     * stats timer prints per-window deltas against the *_cached snapshots. Simple
+     * ++/read races only ever lose/skew a single count per window, which is fine
+     * for a diagnostic frame-rate readout (same lock-free approach as video_fps). */
+    beken_timer_t stats_timer;
+    uint8_t  stats_timer_on;
+    volatile uint32_t st_wifi_frames;   /* complete AUs received over wifi     */
+    volatile uint32_t st_wifi_bytes;    /* their total byte count              */
+    volatile uint32_t st_dec_ok;        /* successful h264 decodes             */
+    volatile uint32_t st_dec_fail;      /* failed decodes (broken reference)   */
+    volatile uint32_t st_dec_skip;      /* AUs skipped while waiting for IDR    */
+    uint32_t st_wifi_frames_c;          /* cached snapshots for delta compute  */
+    uint32_t st_wifi_bytes_c;
+    uint32_t st_dec_ok_c;
+    uint32_t st_dec_fail_c;
+    uint32_t st_dec_skip_c;
 } dl_video_ctx_t;
 
 static dl_video_ctx_t s_dl = {0};
@@ -106,6 +151,92 @@ void doorbell_downlink_video_notify_ref_break(void)
     {
         s_dl.ref_break_pending = 1U;
     }
+}
+
+void doorbell_downlink_video_stats_on_recv(uint32_t bytes)
+{
+    s_dl.st_wifi_frames++;
+    s_dl.st_wifi_bytes += bytes;
+}
+
+/* 1s timer: emit one dense line of downlink receive/decode rates. Always prints
+ * while running -- a "wifi[0f 0kbps]" or "h264[ok 0f ...]" line is precisely the
+ * signal needed when the on-screen picture is frozen, so zero windows are NOT
+ * suppressed (unlike video_fps.c, which is a per-transfer TX probe). */
+static void dl_stats_dump(void *param)
+{
+    (void)param;
+
+    uint32_t wf = s_dl.st_wifi_frames;
+    uint32_t wb = s_dl.st_wifi_bytes;
+    uint32_t ok = s_dl.st_dec_ok;
+    uint32_t fa = s_dl.st_dec_fail;
+    uint32_t sk = s_dl.st_dec_skip;
+
+    uint32_t wifi_fps  = wf - s_dl.st_wifi_frames_c;
+    uint32_t wifi_kbps = (wb - s_dl.st_wifi_bytes_c) * 8U / 1024U;
+    uint32_t dec_fps   = ok - s_dl.st_dec_ok_c;
+    uint32_t dec_fail  = fa - s_dl.st_dec_fail_c;
+    uint32_t dec_skip  = sk - s_dl.st_dec_skip_c;
+
+    s_dl.st_wifi_frames_c = wf;
+    s_dl.st_wifi_bytes_c  = wb;
+    s_dl.st_dec_ok_c      = ok;
+    s_dl.st_dec_fail_c    = fa;
+    s_dl.st_dec_skip_c    = sk;
+
+    LOGI("fps: wifi[%uf %ukbps] h264d[ok %uf fail %u skip %u]\n",
+         (unsigned)wifi_fps, (unsigned)wifi_kbps,
+         (unsigned)dec_fps, (unsigned)dec_fail, (unsigned)dec_skip);
+}
+
+static void dl_stats_start(void)
+{
+    if (s_dl.stats_timer_on != 0U)
+    {
+        return;
+    }
+
+    s_dl.st_wifi_frames = 0U;
+    s_dl.st_wifi_bytes  = 0U;
+    s_dl.st_dec_ok      = 0U;
+    s_dl.st_dec_fail    = 0U;
+    s_dl.st_dec_skip    = 0U;
+    s_dl.st_wifi_frames_c = 0U;
+    s_dl.st_wifi_bytes_c  = 0U;
+    s_dl.st_dec_ok_c      = 0U;
+    s_dl.st_dec_fail_c    = 0U;
+    s_dl.st_dec_skip_c    = 0U;
+
+    if (rtos_init_timer(&s_dl.stats_timer, DL_STATS_DUMP_INTERVAL_MS,
+                        dl_stats_dump, NULL) != BK_OK)
+    {
+        LOGW("stats timer init failed\n");
+        return;
+    }
+    if (rtos_start_timer(&s_dl.stats_timer) != BK_OK)
+    {
+        LOGW("stats timer start failed\n");
+        rtos_deinit_timer(&s_dl.stats_timer);
+        os_memset(&s_dl.stats_timer, 0, sizeof(s_dl.stats_timer));
+        return;
+    }
+    s_dl.stats_timer_on = 1U;
+}
+
+static void dl_stats_stop(void)
+{
+    if (s_dl.stats_timer_on == 0U)
+    {
+        return;
+    }
+    if (rtos_is_timer_running(&s_dl.stats_timer))
+    {
+        rtos_stop_timer(&s_dl.stats_timer);
+    }
+    rtos_deinit_timer(&s_dl.stats_timer);
+    os_memset(&s_dl.stats_timer, 0, sizeof(s_dl.stats_timer));
+    s_dl.stats_timer_on = 0U;
 }
 
 static void dl_apply_ref_break(uint8_t *wait_idr,
@@ -149,16 +280,20 @@ static uint32_t dl_seg_num_for_resolution(uint16_t width, uint16_t height)
 {
     uint32_t frame_segs = (uint32_t)((height + 15U) / 16U);
     uint32_t full_ring;
+    /* 1080p-class uses a shallower ring to leave HSRAM for the concurrent
+     * uplink ISP SP + H.264 encoder; 720p and below keep the deeper ring. */
+    uint32_t shallow = (height >= DL_SEG_1080_HEIGHT_MIN) ? DL_SEG_NUM_SHALLOW_1080
+                                                          : DL_SEG_NUM_SHALLOW;
 
     if (frame_segs == 0U)
     {
-        return DL_SEG_NUM_SHALLOW;
+        return shallow;
     }
 
     full_ring = bk_image_size_get(width, 16U * frame_segs, BK_PIXEL_FORMAT_NV12);
     if (full_ring > DL_SEG_RING_BUDGET)
     {
-        return DL_SEG_NUM_SHALLOW;
+        return shallow;
     }
     return frame_segs;
 }
@@ -252,7 +387,6 @@ static void dl_decode_task_entry(void *arg)
     {
         downlink_frame_t *frame;
         bk_h264_decode_input_t input = {0};
-        bk_h264_decode_info_t info = {0};
         avdk_err_t ret;
         uint8_t is_idr = 0U;
 
@@ -309,6 +443,7 @@ static void dl_decode_task_entry(void *arg)
         if (wait_idr != 0U && is_idr == 0U)
         {
             skipped++;
+            s_dl.st_dec_skip++;
             doorbell_downlink_free_push(frame);
             continue;
         }
@@ -318,8 +453,9 @@ static void dl_decode_task_entry(void *arg)
 
         if (ret == AVDK_ERR_OK)
         {
-            (void)bk_h264_decode_get_info(s_dl.decoder, &info);
             decoded++;
+            s_dl.st_dec_ok++;
+
 #if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
             wait_idr = 0U; /* reference chain valid again */
 #endif
@@ -339,6 +475,7 @@ static void dl_decode_task_entry(void *arg)
         else
         {
             /* Broken reference (lost frame) or undecodable IDR. */
+            s_dl.st_dec_fail++;
 #if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
             wait_idr = 1U; /* wait for the next IDR to resynchronize */
 #endif
@@ -374,6 +511,8 @@ static void dl_decode_task_entry(void *arg)
 
 static void dl_teardown(void)
 {
+    dl_stats_stop();
+
     if (s_dl.bond != NULL)
     {
         bk_flexa_h264d_gpu_bond_stop(s_dl.bond);
@@ -653,6 +792,8 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
         s_dl.done_sem = NULL;
         goto fail_bond;
     }
+
+    dl_stats_start();
 
     LOGI("downlink video started, %ux%u fps=%u seg=%u slots=%u slot_cap=%u\n",
          (unsigned)cfg->width, (unsigned)cfg->height, (unsigned)cfg->fps,

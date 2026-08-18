@@ -21,6 +21,8 @@
 #include <components/bk_display.h>
 #include <components/bk_video_player/bk_video_player_types.h>
 
+#include "boot_video_player.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -68,10 +70,10 @@ typedef struct
 
 /* ===================== display (boot_video_display.c) ===================== */
 
-avdk_err_t boot_video_lcd_open_with_format(bk_display_ctlr_handle_t *out_handle,
+avdk_err_t boot_video_lcd_open_with_format(const boot_video_display_ops_t *ops,
+                                           bk_display_ctlr_handle_t *out_handle,
                                            boot_video_lcd_fmt_t fmt);
-avdk_err_t boot_video_lcd_close(void);
-bool boot_video_lcd_get_size(uint16_t *width, uint16_t *height);
+avdk_err_t boot_video_lcd_close(const boot_video_display_ops_t *ops);
 avdk_err_t boot_video_lcd_apply_format(bk_display_ctlr_handle_t handle, boot_video_lcd_fmt_t fmt);
 boot_video_lcd_fmt_t boot_video_lcd_format_for_video_codec(video_player_video_format_t format);
 
