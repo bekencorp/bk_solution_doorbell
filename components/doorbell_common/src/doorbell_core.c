@@ -268,7 +268,7 @@ static void doorbell_message_handle(void *param)
 
                 case DBEVT_REMOTE_DEVICE_DISCONNECTED:
                 {
-                    if (db_info->stopping)
+                    if ((db_info->service == DOORBELL_SERVICE_NONE) || (db_info->stopping == BK_TRUE))
                     {
                         LOGD("DBEVT_REMOTE_DEVICE_DISCONNECTED is stopping, skip\r\n");
                         break;
@@ -281,18 +281,6 @@ static void doorbell_message_handle(void *param)
 #ifdef CONFIG_VOICE_SERVICE
                     doorbell_audio_turn_off();
 #endif
-
-#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-                    if (db_info->service == DOORBELL_SERVICE_LAN_TCP)
-                    {
-                        doorbell_bk_network_transfer_deinit("tcp_service");
-                    }
-                    else if (db_info->service == DOORBELL_SERVICE_LAN_UDP)
-                    {
-                        doorbell_bk_network_transfer_deinit("udp_service");
-                    }
-#endif
-
                     /* Abrupt disconnect: phone may not have sent TURN_OFF, so close
                      * camera/LCD hardware explicitly. Both are safe no-ops when
                      * already closed (video_enable/lcd_enable == false). */
@@ -353,6 +341,13 @@ static void doorbell_message_handle(void *param)
                         LOGI("Multimedia active, skip LAN TCP service stop\n");
                         break;
                     }
+
+                    if (db_info->service == DOORBELL_SERVICE_NONE) {
+                        LOGD("LAN TCP already stopped, continue keepalive\n");
+                        doorbell_keepalive_send_keepalive();
+                        break;
+                    }
+                    db_info->service = DOORBELL_SERVICE_NONE;
                     doorbell_bk_network_transfer_deinit("tcp_service");
                 }
                 break;
@@ -365,6 +360,12 @@ static void doorbell_message_handle(void *param)
                         LOGI("Multimedia active, skip LAN UDP service stop\n");
                         break;
                     }
+                    if (db_info->service == DOORBELL_SERVICE_NONE) {
+                        LOGD("LAN UDP already stopped, continue keepalive\n");
+                        doorbell_keepalive_send_keepalive();
+                        break;
+                    }
+                    db_info->service = DOORBELL_SERVICE_NONE;
                     doorbell_bk_network_transfer_deinit("udp_service");
                 }
                 break;
