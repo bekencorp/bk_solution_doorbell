@@ -132,12 +132,12 @@ projects/doorbell/build/bk7258/doorbell/package/all-app.bin
 
 ## 参考工程
 
-| 工程名                                                  | 主要功能                                  | 详细说明                                                                                                                  |
-| ---------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| [../projects/doorbell/](../projects/doorbell/)       | H.264 网络图传、LCD 显示、双向对讲、BLE 配网。        | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/doorbell/index.html)    |
-| [../projects/doorviewer/](../projects/doorviewer/)   | MJPEG 网络图传、LCD 显示，兼容性更好。              | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/doorviewer/index.html)  |
-| [../projects/doorbell_lp/](../projects/doorbell_lp/) | 在 doorbell 基础上增加 AP 掉电低功耗保活。          | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/doorbell_lp/index.html) |
-| [../projects/doorbell_4M/](../projects/doorbell_4M/) | MJPEG 图传、LCD 显示，音频支持板载 Speaker 与 UAC。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/doorbell_4M/index.html) |
+| 工程名 | 主要功能 | 详细说明 |
+| --- | --- | --- |
+| [doorbell](../projects/doorbell/) | H.264 网络图传、LCD 显示、双向对讲、BLE 配网。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/doorbell/index.html) |
+| [doorviewer](../projects/doorviewer/) | MJPEG 网络图传、LCD 显示，兼容性更好。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/doorviewer/index.html) |
+| [doorbell_lp](../projects/doorbell_lp/) | 在 doorbell 基础上增加 AP 掉电低功耗保活。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/doorbell_lp/index.html) |
+| [doorbell_4M](../projects/doorbell_4M/) | MJPEG 图传、LCD 显示，音频支持板载 Speaker 与 UAC。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/doorbell_4M/index.html) |
 
 各工程的适用场景与差异说明，请参阅在线文档的 [示例工程](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/zh_CN/v3.1.1/projects/index.html) 页面。
 
