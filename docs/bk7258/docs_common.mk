@@ -23,7 +23,7 @@ PROCESSES     = -j32
 #PROCESSES     =
 PAPER         =
 BUILDDIR      = _build
-DOCS_VERSION := latest
+DOCS_VERSION := 3.1.1
 
 ifneq ("$(TARGET_DIR)", "")
 	export BUILDDIR = $(TARGET_DIR)
