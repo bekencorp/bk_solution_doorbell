@@ -1,3 +1,4 @@
 cd doorbell;make bk7258
 cd doorbell_lp;make bk7258
 cd doorviewer;make bk7258
+cd doorbell_4M;make bk7258
