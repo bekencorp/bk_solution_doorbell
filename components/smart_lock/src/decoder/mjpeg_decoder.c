@@ -22,7 +22,8 @@
 #define LOG_DEBUG(...) do {} while(0)
 #endif
 
-static db_device_info_t *s_mjpeg_decoder_info = NULL;
+
+extern db_device_info_t *db_device_info;
 
 static bk_err_t jpeg_complete(bk_err_t result, frame_buffer_t *out_frame)
 {
@@ -97,10 +98,10 @@ static bk_err_t decode_complete(dec_end_type_t format_type, bk_err_t result, fra
 
     if (format_type == HW_DEC_END)
     {
-        if (s_mjpeg_decoder_info && s_mjpeg_decoder_info->display_ctlr_handle)
+        if (db_device_info && db_device_info->display_ctlr_handle)
         {
-            LOG_DEBUG("%s: HW_DEC_END, call bk_display_flush, handle:%p\n", __func__, s_mjpeg_decoder_info->display_ctlr_handle);
-            ret = bk_display_flush(s_mjpeg_decoder_info->display_ctlr_handle, (void *)out_frame, display_frame_free_cb);
+            LOG_DEBUG("%s: HW_DEC_END, call bk_display_flush, handle:%p\n", __func__, db_device_info->display_ctlr_handle);
+            ret = bk_display_flush(db_device_info->display_ctlr_handle, (void *)out_frame, display_frame_free_cb);
             if (ret != BK_OK)
             {
                 LOG_DEBUG("%s: HW_DEC_END, bk_display_flush FAIL ret:%d, call display_frame_free_cb\n",
@@ -120,10 +121,10 @@ static bk_err_t decode_complete(dec_end_type_t format_type, bk_err_t result, fra
     }
     else if (format_type == SW_DEC_END)
     {
-        if (s_mjpeg_decoder_info && s_mjpeg_decoder_info->display_ctlr_handle)
+        if (db_device_info && db_device_info->display_ctlr_handle)
         {
-            LOG_DEBUG("%s: SW_DEC_END, call bk_display_flush, handle:%p\n", __func__, s_mjpeg_decoder_info->display_ctlr_handle);
-            ret = bk_display_flush(s_mjpeg_decoder_info->display_ctlr_handle, (void *)out_frame, display_frame_free_cb);
+            LOG_DEBUG("%s: SW_DEC_END, call bk_display_flush, handle:%p\n", __func__, db_device_info->display_ctlr_handle);
+            ret = bk_display_flush(db_device_info->display_ctlr_handle, (void *)out_frame, display_frame_free_cb);
             if (ret != BK_OK)
             {
                 LOG_DEBUG("%s: SW_DEC_END, bk_display_flush FAIL ret:%d, call display_frame_free_cb\n",
@@ -172,9 +173,9 @@ static media_rotate_t get_rotate_angle(uint32_t rotate)
 
 void mjpeg_decoder_reset(void)
 {
-    if (s_mjpeg_decoder_info && s_mjpeg_decoder_info->video_pipeline_handle)
+    if (db_device_info && db_device_info->video_pipeline_handle)
     {
-        bk_video_pipeline_reset_decode(s_mjpeg_decoder_info->video_pipeline_handle);
+        bk_video_pipeline_reset_decode(db_device_info->video_pipeline_handle);
     }
 }
 
@@ -182,10 +183,7 @@ int mjpeg_decode_open(db_device_info_t *info, media_rotate_mode_t rot, int angle
 {
     avdk_err_t ret = AVDK_ERR_INVAL;
 
-    s_mjpeg_decoder_info = info;
-
     LOG_DEBUG("%s: cam_type:%d, rot:%d, angle:%d\n", __func__, info->cam_type, rot, angle);
-
 
     if (info->cam_type == DVP_CAMERA)
     {
@@ -266,7 +264,6 @@ int mjpeg_decode_close(db_device_info_t *info)
             LOGE("%s: yuv_display_close failed, ret:%d\n", __func__, ret);
         }
         LOG_DEBUG("%s: YUV display closed\n", __func__);
-        s_mjpeg_decoder_info = NULL;
         return ret;
     }
 
@@ -289,7 +286,6 @@ int mjpeg_decode_close(db_device_info_t *info)
         frame_queue_v2_unregister_consumer(IMAGE_MJPEG, CONSUMER_DECODER);
     }
 
-    s_mjpeg_decoder_info = NULL;
     LOG_DEBUG("%s: mjpeg decoder close complete\n", __func__);
     return ret;
 }
