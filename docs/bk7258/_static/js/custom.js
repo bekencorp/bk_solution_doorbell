@@ -6,7 +6,7 @@ var sdkList = [
         "name" : "bk7258",
         "lang" : [ "zh-cn" ],
         "version" : [
-            "3.1.1"
+            "v3.1.1"
         ]
     }
 ]

@@ -68,7 +68,7 @@ def setup(app):
     DOCS_VERSION = os.getenv('DOCS_VERSION')
 
     if DOCS_VERSION is None:
-        app.add_role('link_to_translation', crosslink('%s../../%s/3.1.1/%s.html'))
+        app.add_role('link_to_translation', crosslink('%s../../%s/v3.1.1/%s.html'))
     else:
         app.add_role('link_to_translation', crosslink('%s../../%s/{}/%s.html'.format(DOCS_VERSION)))
 
