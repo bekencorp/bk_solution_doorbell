@@ -8,16 +8,16 @@
 
 ## 工程编译
 
-- 此工程依赖 `bk_avdk_smp_main`。编译时需要下载 `bk_avdk_smp_main` 代码。
+- 此工程依赖 `bk_avdk_smp`。编译时需要下载 `bk_avdk_smp` 代码。
 - 编译方法：在 doorbell 方案目录 `./projects/doorbell` 下编译（doorviewer 方案一样）。
-- 编译之前需要先修改 Makefile 文件（`./projects/doorbell/Makefile`），将依赖的源码映射到 `bk_avdk_smp_main` 上，参考如下：
+- 编译之前需要先修改 Makefile 文件（`./projects/doorbell/Makefile`），将依赖的源码映射到 `bk_avdk_smp` 上，参考如下：
 
 ```makefile
-# 映射依赖的源码到 bk_avdk_smp_main 上
+# 映射依赖的源码到 bk_avdk_smp 上
 SDK_DIR ?= $(abspath ../..)
 
 # change to
-SDK_DIR = /home/user.name/bk_avdk_smp_main
+SDK_DIR = /home/user.name/bk_avdk_smp
 ```
 
 - 编译命令：`make bk7258`

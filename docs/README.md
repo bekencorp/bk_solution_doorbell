@@ -8,16 +8,16 @@ This is a doorbell solution that supports real-time audio and video transmission
 
 ## Project Compilation
 
-- This project depends on `bk_avdk_smp_main`. You need to download the `bk_avdk_smp_main` code when compiling.
+- This project depends on `bk_avdk_smp`. You need to download the `bk_avdk_smp` code when compiling.
 - Compilation method: compile under the doorbell solution directory `./projects/doorbell` (same for the doorviewer solution).
-- Before compilation, edit the Makefile (`./projects/doorbell/Makefile`) to map the dependent source code to `bk_avdk_smp_main`, as shown below:
+- Before compilation, edit the Makefile (`./projects/doorbell/Makefile`) to map the dependent source code to `bk_avdk_smp`, as shown below:
 
 ```makefile
-# Map dependent source code to bk_avdk_smp_main
+# Map dependent source code to bk_avdk_smp
 SDK_DIR ?= $(abspath ../..)
 
 # change to
-SDK_DIR = /home/user.name/bk_avdk_smp_main
+SDK_DIR = /home/user.name/bk_avdk_smp
 ```
 
 - Compilation command: `make bk7258`
