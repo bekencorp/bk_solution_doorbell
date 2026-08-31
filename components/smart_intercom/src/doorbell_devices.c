@@ -1026,7 +1026,7 @@ bk_err_t doorbell_devices_stop(void)
 
     bk_wifi_set_wifi_media_mode(false);
 
-    bk_wifi_set_video_quality(WIFI_VIDEO_QUALITY_HD);
+    //bk_wifi_set_video_quality(WIFI_VIDEO_QUALITY_HD);
     s_db_trans_cfg->transfer_thread = NULL;
     if (s_db_trans_cfg->sem)
     {
@@ -1178,7 +1178,7 @@ bk_err_t doorbell_devices_start(uint16_t img_format)
 
     bk_wifi_set_wifi_media_mode(true);
 
-    bk_wifi_set_video_quality(WIFI_VIDEO_QUALITY_SD);
+    //bk_wifi_set_video_quality(WIFI_VIDEO_QUALITY_SD);
 
     return BK_OK;
 
