@@ -6,6 +6,7 @@
 
 #include "doorbell_rpc_internal.h"
 #include "doorbell_downlink_video.h"
+#include "doorbell_devices_intercom.h"
 
 #define TAG "db-rpc-vi"
 #define LOGD(...) BK_LOGD(TAG, ##__VA_ARGS__)
@@ -96,8 +97,11 @@ static cJSON *vi_reason(const char *reason)
  *                (params.downlink, fields identical to
  *                 doorbell.imageStream.setReceiveConfig)
  *
- * Atomicity: the uplink is opened first; if the downlink then fails to start,
- * the uplink is rolled back so the device never rests in a half-open state.
+ * Atomicity: the uplink encoder is opened first so it can allocate from
+ * MEM_SLAB_HEAP_CODED before the downlink H.264 slot pool; if the downlink
+ * then fails, the uplink is rolled back. Downlink uses seg=3 + ping-pong
+ * pre-reservation (see doorbell_downlink_video.c) so HSRAM still fits once
+ * the uplink ISP/H264 flexa buffers are live.
  * Idempotency: a repeated call while already in intercom mode reconfigures with
  * the new parameters (tear down first, then re-open).
  */
@@ -141,21 +145,33 @@ bk_err_t doorbell_rpc_video_intercom_turn_on(cJSON *params, cJSON *id)
         s_work_mode = DB_WORK_MODE_IDLE;
     }
 
-    /* Open uplink first. */
+    /* Uplink first: H.264 encoder vcenc_h264_memalloc() needs MEM_SLAB_HEAP_CODED
+     * (coeff/ref buffers). Downlink img_manager pre-allocates 6 coded slots and
+     * must not run first or vcenc returns VCENC_EWL_MEMORY_ERROR (-6). Skip the
+     * single-view preview GPU; downlink compositor owns GPU with HSRAM budgeting. */
+    doorbell_devices_preview_gpu_hold(true);
+    doorbell_downlink_set_concurrent_uplink(true);
+
     if (doorbell_rpc_camera_uplink_open_from_params(uplink, &up_err_code, &up_err_msg) != BK_OK)
     {
+        doorbell_downlink_set_concurrent_uplink(false);
+        doorbell_devices_preview_gpu_hold(false);
         LOGE("videoIntercom.turnOn: uplink open failed (%s)\n", up_err_msg ? up_err_msg : "");
         return doorbell_rpc_send_error(id, up_err_code, up_err_msg, NULL);
     }
 
-    /* Then bring up the downlink; roll the uplink back on failure. */
     if (doorbell_downlink_set_h264_receive_config(&dl_cfg) != BK_OK)
     {
-        LOGE("videoIntercom.turnOn: downlink open failed, rolling back uplink\n");
+        doorbell_downlink_set_concurrent_uplink(false);
         (void)doorbell_rpc_camera_uplink_close();
+        doorbell_devices_preview_gpu_hold(false);
+        LOGE("videoIntercom.turnOn: downlink open failed, rolling back uplink\n");
         return doorbell_rpc_send_error(id, DB_RPC_ERR_NOT_SUPPORT, "downlink open failed",
                                        vi_reason("downlink"));
     }
+
+    doorbell_downlink_set_concurrent_uplink(false);
+    doorbell_devices_preview_gpu_hold(false);
 
     s_work_mode = DB_WORK_MODE_INTERCOM;
     LOGI("videoIntercom.turnOn: uplink + downlink %ux%u up\n",

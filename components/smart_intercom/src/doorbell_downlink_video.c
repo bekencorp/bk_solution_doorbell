@@ -42,8 +42,18 @@
  *                  "vcdec decode timeout irq_status=0x401" (decoder stalls
  *                  waiting for the 2-segment ring to drain). Do NOT use 2.
  * So 1080p uses seg=3 (the minimum that both decodes AND leaves HSRAM room once
- * trs_task is off HSRAM). 720p keeps seg=4 (already has HSRAM headroom). */
-#define DL_SEG_NUM_SHALLOW_1080  3U
+ * trs_task is off HSRAM). 720p keeps seg=4 when downlink-only; with concurrent
+ * uplink (videoIntercom) seg=4 (~120KB ring) leaves no room for the GPU ping-pong
+ * (~60KB) after the H.264 encoder flexa buffers are live -> main window green.
+ * 720p intercom with concurrent uplink uses seg=3 (same minimum as 1080p: seg=2
+ * stalls the FLEXA H264 decode<->GPU bond with vcdec timeout 0x401). seg=3
+ * pp_buf (~92KB) + ping-pong (~60KB) leaves ~142KB HSRAM; compositor GPU also
+ * needs VG-Lite contiguous + 10KB flexa thread stack (~146KB total). Reduce
+ * CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ slightly (0x1E000 vs 0x20000) so seg=3
+ * passes the dl_hsram_compositor_fits() gate. Do NOT drop below seg=3. */
+#define DL_SEG_NUM_SHALLOW_UPLINK  3U
+#define DL_SEG_NUM_SHALLOW_720_INTERCOM  DL_SEG_NUM_SHALLOW_UPLINK
+#define DL_SEG_NUM_SHALLOW_1080    DL_SEG_NUM_SHALLOW_UPLINK
 /* Height (px) at/above which the 1080p-class shallow ring depth is used. */
 #define DL_SEG_1080_HEIGHT_MIN   1080U
 /* Full-frame ring budget: width * (16 * frame_segs) * 3/2 above this -> shallow. */
@@ -107,6 +117,41 @@
 #define DL_PIP_HEIGHT        180U
 #define DL_PIP_MARGIN        32U
 
+/* Compositor GPU HSRAM beyond pp_buf/ping-pong (bk_gpu_init + bk_gpu_open).
+ * ping-pong is held during this check but released before bk_gpu_open()
+ * re-allocates the same block, so do not double-count it in the budget.
+ * Concurrent 720p intercom needs seg=3 (~142KB post-reserve free); cap the
+ * VG-Lite budget at 0x1E000 so the gate matches video_intercom defconfig
+ * (0x20000 leaves ~10KB after init -- not enough for the 10KB flexa thread). */
+#ifdef CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ
+#define DL_GPU_VG_CONTIGUOUS_BYTES  ((uint32_t)CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ)
+#else
+#define DL_GPU_VG_CONTIGUOUS_BYTES  (128U * 1024U)
+#endif
+/* Concurrent uplink+downlink 720p seg=3 leaves ~1.7KB too little HSRAM for the
+ * GPU flexa thread stack when VG=0x1E000 (runtime evidence: decoder init/open
+ * itself consumes ~10KB HSRAM, GPU ping-pong 61504 + thread 10240 on top). VG
+ * 0x1C000 cleared GPU thread creation (~5.5KB steady margin, runtime-confirmed)
+ * but that residual ~5.5KB is then eaten by the DPU per-flush viv_interface
+ * (allocated from HSRAM via nano_malloc_wrapper->hsram_malloc) plus the PIP SP
+ * cam_reader stack, so once PIP is enabled the DPU flush's HSRAM alloc fails
+ * ("dev_ioctl: malloc iface failed") -> DPU stops (rps->0) -> GPU output pool is
+ * never drained -> GPU stalls -> H264d<->GPU FLEXA ring never advances ->
+ * "decode timeout irq_status=0x401" -> both windows freeze. The GPU only does
+ * image blits (no vector tessellation) and command buffers are 2*0x2000=16KB, so
+ * 0x14000 (81920) of VG-Lite contiguous is ample for the 1280x720->1920x1088
+ * blit + 320x180 PIP overlay (AI-solution projects run the GPU with 0x12000).
+ * Dropping VG to 0x14000 frees 32KB of HSRAM, lifting the steady margin to ~38KB
+ * so the DPU per-flush alloc + PIP always fit. */
+#define DL_GPU_VG_INTERCOM_MAX_BYTES  (0x14000U)
+#define DL_GPU_FLEXA_STACK_BYTES      (10U * 1024U)
+#define DL_GPU_HSram_HEADROOM         (0U)
+
+static uint32_t dl_gpu_vg_budget_bytes(void)
+{
+    return DL_GPU_VG_CONTIGUOUS_BYTES;
+}
+
 typedef struct
 {
     volatile uint8_t running;
@@ -144,6 +189,27 @@ typedef struct
 } dl_video_ctx_t;
 
 static dl_video_ctx_t s_dl = {0};
+static volatile uint8_t s_dl_concurrent_uplink;
+static void *s_dl_pingpong_hold;
+
+void doorbell_downlink_set_concurrent_uplink(bool expect)
+{
+    s_dl_concurrent_uplink = expect ? 1U : 0U;
+}
+
+void doorbell_downlink_release_pingpong_hold(void)
+{
+    if (s_dl_pingpong_hold != NULL)
+    {
+        hsram_free(s_dl_pingpong_hold);
+        s_dl_pingpong_hold = NULL;
+    }
+}
+
+static void dl_pingpong_hold_clear(void)
+{
+    doorbell_downlink_release_pingpong_hold();
+}
 
 void doorbell_downlink_video_notify_ref_break(void)
 {
@@ -281,9 +347,18 @@ static uint32_t dl_seg_num_for_resolution(uint16_t width, uint16_t height)
     uint32_t frame_segs = (uint32_t)((height + 15U) / 16U);
     uint32_t full_ring;
     /* 1080p-class uses a shallower ring to leave HSRAM for the concurrent
-     * uplink ISP SP + H.264 encoder; 720p and below keep the deeper ring. */
+     * uplink ISP SP + H.264 encoder; 720p intercom does the same once uplink
+     * is already live (see DL_SEG_NUM_SHALLOW_UPLINK). */
     uint32_t shallow = (height >= DL_SEG_1080_HEIGHT_MIN) ? DL_SEG_NUM_SHALLOW_1080
                                                           : DL_SEG_NUM_SHALLOW;
+    if ((doorbell_devices_uplink_active() || s_dl_concurrent_uplink != 0U) &&
+        height >= 720U && height < DL_SEG_1080_HEIGHT_MIN)
+    {
+        /* seg=3 is the default shallow depth; dl_hsram_alloc_pp_buf() may drop
+         * to DL_SEG_NUM_SHALLOW_720_INTERCOM (2) when VG-Lite + GPU thread do
+         * not fit alongside the live uplink encoder. */
+        shallow = DL_SEG_NUM_SHALLOW_UPLINK;
+    }
 
     if (frame_segs == 0U)
     {
@@ -354,6 +429,149 @@ static void dl_hsram_aligned_free(void *ptr)
         return;
     }
     os_free(((void **)ptr)[-1]);
+}
+
+static void dl_compositor_dst_size(uint16_t *dst_w, uint16_t *dst_h)
+{
+    gpu_board_config_t *board = app_gpu_board_config_get();
+
+    if (board != NULL && board->flexa.dst_width != 0U && board->flexa.dst_height != 0U)
+    {
+        *dst_w = board->flexa.dst_width;
+        *dst_h = board->flexa.dst_height;
+    }
+    else
+    {
+        *dst_w = 1920U;
+        *dst_h = 1080U;
+    }
+}
+
+/* After pp_buf + ping-pong hold: bk_gpu_init() consumes VG-Lite HSRAM; the held
+ * ping-pong block is returned before bk_gpu_open() re-allocates it, then the
+ * flexa thread stack is taken from what remains (free - VG). */
+static uint32_t dl_hsram_compositor_need_bytes(void)
+{
+    return dl_gpu_vg_budget_bytes() + DL_GPU_FLEXA_STACK_BYTES +
+           DL_GPU_HSram_HEADROOM;
+}
+
+static bool dl_hsram_compositor_fits(void)
+{
+    size_t free_bytes = rtos_get_hsram_free_heap_size();
+    uint32_t need = dl_hsram_compositor_need_bytes();
+
+    if (DL_GPU_VG_CONTIGUOUS_BYTES > DL_GPU_VG_INTERCOM_MAX_BYTES)
+    {
+        return false;
+    }
+
+    return free_bytes >= need;
+}
+
+/* Reserve compositor GPU ping-pong first, then the FLEXA decode ring. Probing
+ * ping-pong after pp_buf often passes but bk_gpu_open() still fails because the
+ * aligned pp allocation fragments HSRAM; holding ping-pong until open avoids that. */
+static bk_err_t dl_hsram_alloc_pp_buf(uint16_t width, uint16_t height,
+                                      uint32_t *out_seg_num,
+                                      uint8_t **out_pp_buf,
+                                      uint32_t *out_pp_size)
+{
+    uint16_t dst_w;
+    uint16_t dst_h;
+    uint32_t ping_sz;
+    uint32_t seg;
+    uint32_t ideal_seg;
+
+    if (out_seg_num == NULL || out_pp_buf == NULL || out_pp_size == NULL)
+    {
+        return BK_ERR_PARAM;
+    }
+
+    dl_pingpong_hold_clear();
+
+    dl_compositor_dst_size(&dst_w, &dst_h);
+    ping_sz = doorbell_compositor_gpu_pingpong_bytes(dst_w, dst_h);
+    ideal_seg = dl_seg_num_for_resolution(width, height);
+    seg = ideal_seg;
+
+    while (true)
+    {
+        uint32_t min_seg = (height < DL_SEG_1080_HEIGHT_MIN) ? DL_SEG_NUM_SHALLOW_720_INTERCOM
+                                                             : DL_SEG_NUM_SHALLOW_UPLINK;
+        uint32_t pp_size = bk_image_size_get(width,
+                                             16U * DL_SEG_HEIGHT_MB * seg,
+                                             BK_PIXEL_FORMAT_NV12);
+        void *ping;
+        uint8_t *pp;
+
+        if (seg < min_seg)
+        {
+            break;
+        }
+
+        ping = bk_get_gpu_output_buffer(ping_sz);
+        if (ping == NULL)
+        {
+            LOGW("DL HSRAM: pingpong reserve failed seg=%u ping=%u free=%u\n",
+                 (unsigned)seg, (unsigned)ping_sz,
+                 (unsigned)rtos_get_hsram_free_heap_size());
+            seg--;
+            continue;
+        }
+
+        pp = (uint8_t *)dl_hsram_aligned_malloc(64U, pp_size);
+        if (pp == NULL)
+        {
+            hsram_free(ping);
+            LOGW("DL HSRAM: pp_buf seg=%u size=%u failed, free=%u\n",
+                 (unsigned)seg, (unsigned)pp_size,
+                 (unsigned)rtos_get_hsram_free_heap_size());
+            seg--;
+            continue;
+        }
+
+        s_dl_pingpong_hold = ping;
+        if (!dl_hsram_compositor_fits())
+        {
+            dl_hsram_aligned_free(pp);
+            hsram_free(ping);
+            s_dl_pingpong_hold = NULL;
+            if (DL_GPU_VG_CONTIGUOUS_BYTES > DL_GPU_VG_INTERCOM_MAX_BYTES)
+            {
+                LOGW("DL HSRAM: VG cfg 0x%x > intercom max 0x%x, rebuild with "
+                     "CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ=0x14000\n",
+                     (unsigned)DL_GPU_VG_CONTIGUOUS_BYTES,
+                     (unsigned)DL_GPU_VG_INTERCOM_MAX_BYTES);
+            }
+            LOGW("DL HSRAM: compositor budget fail seg=%u free=%u need>=%u vg_cfg=0x%x\n",
+                 (unsigned)seg, (unsigned)rtos_get_hsram_free_heap_size(),
+                 (unsigned)dl_hsram_compositor_need_bytes(),
+                 (unsigned)DL_GPU_VG_CONTIGUOUS_BYTES);
+            seg--;
+            continue;
+        }
+
+        os_memset(pp, 0, pp_size);
+        *out_seg_num = seg;
+        *out_pp_buf = pp;
+        *out_pp_size = pp_size;
+        LOGI("DL HSRAM: seg=%u pp=%u ping=%u reserved free=%u vg_cfg=0x%x\n",
+             (unsigned)seg, (unsigned)pp_size, (unsigned)ping_sz,
+             (unsigned)rtos_get_hsram_free_heap_size(),
+             (unsigned)DL_GPU_VG_CONTIGUOUS_BYTES);
+        if (seg != ideal_seg)
+        {
+            LOGW("DL HSRAM: using seg=%u (ideal=%u) for concurrent uplink\n",
+                 (unsigned)seg, (unsigned)ideal_seg);
+        }
+        return BK_OK;
+    }
+
+    dl_pingpong_hold_clear();
+    LOGE("DL HSRAM: no flexa/pingpong budget for %ux%u (need ping=%u)\n",
+         (unsigned)width, (unsigned)height, (unsigned)ping_sz);
+    return BK_ERR_NO_MEM;
 }
 
 static void dl_decode_task_entry(void *arg)
@@ -482,11 +700,11 @@ static void dl_decode_task_entry(void *arg)
                 s_dl.pip_deferred = 0U;
                 if (doorbell_downlink_pip_enable() == BK_OK)
                 {
-                    LOGI("DL720 H2: deferred PIP enabled after first decode\n");
+                    LOGI("deferred PIP enabled after first decode\n");
                 }
                 else
                 {
-                    LOGW("DL720 H2: deferred PIP enable failed\n");
+                    LOGW("deferred PIP enable failed\n");
                 }
             }
         }
@@ -555,6 +773,7 @@ static void dl_teardown(void)
         s_dl.pp_buf = NULL;
     }
     s_dl.pp_size = 0U;
+    dl_pingpong_hold_clear();
 
     /* Restore the single-view preview GPU bond now that the downlink
      * compositor has released the GPU and its HSRAM ring. */
@@ -656,6 +875,42 @@ static void dl_zerocopy_register(void)
  * enabled later via doorbell_downlink_pip_enable(). When uplink is already on
  * and downlink is 720p-class, defer PIP so the H.264 decoder recon pool can
  * allocate before the SP channel (~690KB) is opened. */
+/* vcdec_h264_open() needs a small UNCODED table (~4KB) plus a 4KB rbsp scratch
+ * (AP heap via vsios_malloc). Log which pool is exhausted when open fails. */
+static void dl_decoder_open_probe(void)
+{
+    beken_semaphore_t probe_sem = NULL;
+    void *uncoded = bk_frame_buffer_malloc(MEM_SLAB_HEAP_UNCODED, 4044U + 4U);
+
+    if (uncoded == NULL)
+    {
+        LOGE("DL probe: UNCODED table alloc failed (slab full before decoder open)\n");
+    }
+    else
+    {
+        bk_frame_buffer_free(uncoded);
+    }
+
+    uncoded = os_malloc(4096U);
+    if (uncoded == NULL)
+    {
+        LOGE("DL probe: os_malloc rbsp scratch failed (AP heap exhausted)\n");
+    }
+    else
+    {
+        os_free(uncoded);
+    }
+
+    if (rtos_init_semaphore(&probe_sem, 1) != BK_OK)
+    {
+        LOGE("DL probe: rtos_init_semaphore failed (decode_sem budget exhausted)\n");
+    }
+    else
+    {
+        (void)rtos_deinit_semaphore(&probe_sem);
+    }
+}
+
 static void dl_fill_pip_cfg(doorbell_compositor_config_t *comp_cfg,
                             const doorbell_downlink_h264_config_t *dl_cfg,
                             bool defer_for_memory)
@@ -711,17 +966,23 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
      * encode bond keeps running; ISP SP feeds the PIP self-view. */
     (void)doorbell_devices_preview_gpu_detach();
 
-    s_dl.pp_size = bk_image_size_get(cfg->width,
-                                     16U * DL_SEG_HEIGHT_MB * seg_num,
-                                     BK_PIXEL_FORMAT_NV12);
-    s_dl.pp_buf = (uint8_t *)dl_hsram_aligned_malloc(64U, s_dl.pp_size);
-    if (s_dl.pp_buf == NULL)
+    bk_ret = dl_hsram_alloc_pp_buf(cfg->width, cfg->height, &seg_num,
+                                   &s_dl.pp_buf, &s_dl.pp_size);
+    if (bk_ret != BK_OK)
     {
-        LOGE("DL720 H3: alloc pp_buf (%u) failed seg=%u\n",
-             (unsigned)s_dl.pp_size, (unsigned)seg_num);
+        LOGE("alloc pp_buf failed seg=%u\n", (unsigned)seg_num);
+        if (DL_GPU_VG_CONTIGUOUS_BYTES > DL_GPU_VG_INTERCOM_MAX_BYTES)
+        {
+            LOGE("DL HSRAM: rebuild with CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ=0x14000 "
+                 "(runtime 0x%x is too large for seg=3 intercom)\n",
+                 (unsigned)DL_GPU_VG_CONTIGUOUS_BYTES);
+        }
+        if (!doorbell_devices_uplink_active() && s_dl_concurrent_uplink == 0U)
+        {
+            (void)doorbell_devices_preview_gpu_attach();
+        }
         return BK_ERR_NO_MEM;
     }
-    os_memset(s_dl.pp_buf, 0, s_dl.pp_size);
 
     /* Coded AU slots: at 720p use the H.264 AU cap (~460KB), not raw NV12
      * (~1.38MB), so img_manager_init stays within MEM_SLAB_HEAP_CODED. */
@@ -729,7 +990,7 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
     bk_ret = doorbell_downlink_img_manager_init(DL_SLOT_COUNT, slot_capacity);
     if (bk_ret != BK_OK)
     {
-        LOGE("DL720 H1: img manager init failed=%d slots=%u cap=%u\n",
+        LOGE("img manager init failed=%d slots=%u cap=%u\n",
              bk_ret, (unsigned)DL_SLOT_COUNT, (unsigned)slot_capacity);
         goto fail_pp;
     }
@@ -739,18 +1000,27 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
     dl_zerocopy_register();
 #endif
 
-    /* Main = decoded remote picture; PIP = local ISP SP self-view (off until the
-     * camera is on, then enabled at runtime via doorbell_downlink_pip_enable). */
+    /* Concurrent intercom: GPU init first (HSRAM/VG-Lite), then decoder open
+     * (~4KB UNCODED), then the 3x output pool (~6MB), then bk_gpu_open (uses
+     * pool for dpu_frame_buffers). Opening the decoder after bk_gpu_open failed
+     * because gpu_open grabs ~2MB from UNCODED via comp_out_alloc fallback. */
     comp_cfg.main_width = cfg->width;
     comp_cfg.main_height = cfg->height;
+    comp_cfg.defer_out_pool = (doorbell_devices_uplink_active() ||
+                               s_dl_concurrent_uplink != 0U);
+    comp_cfg.defer_gpu_open = comp_cfg.defer_out_pool;
     dl_fill_pip_cfg(&comp_cfg, cfg, true);
     s_dl.pip_deferred = (comp_cfg.pip_enable == 0U &&
                          doorbell_devices_isp_handle_get() != NULL &&
                          cfg->height >= 720U &&
-                         doorbell_devices_uplink_active()) ? 1U : 0U;
+                         comp_cfg.defer_out_pool) ? 1U : 0U;
     if (s_dl.pip_deferred != 0U)
     {
-        LOGI("DL720 H2: defer PIP until first decode (uplink+720p)\n");
+        LOGI("defer PIP until first decode (uplink+720p)\n");
+    }
+    if (comp_cfg.defer_gpu_open)
+    {
+        LOGI("defer gpu_open until decoder+pool ready\n");
     }
 
     bk_ret = doorbell_compositor_start(&comp_cfg, s_dl.pp_buf, seg_num);
@@ -771,13 +1041,38 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
     if (ret != AVDK_ERR_OK)
     {
         LOGE("decoder new failed=%d\n", (int)ret);
-        goto fail_comp;
-    }
-    if (bk_h264_decode_init(s_dl.decoder) != AVDK_ERR_OK ||
-        bk_h264_decode_open(s_dl.decoder) != AVDK_ERR_OK)
-    {
-        LOGE("decoder init/open failed\n");
         goto fail_dec;
+    }
+    if (bk_h264_decode_init(s_dl.decoder) != AVDK_ERR_OK)
+    {
+        LOGE("decoder init failed\n");
+        goto fail_dec;
+    }
+    if (bk_h264_decode_open(s_dl.decoder) != AVDK_ERR_OK)
+    {
+        LOGE("decoder open failed\n");
+        dl_decoder_open_probe();
+        goto fail_dec;
+    }
+
+    if (comp_cfg.defer_out_pool)
+    {
+        bk_ret = doorbell_compositor_out_pool_init();
+        if (bk_ret != BK_OK)
+        {
+            LOGE("deferred compositor pool init failed=%d\n", bk_ret);
+            goto fail_dec;
+        }
+    }
+
+    if (comp_cfg.defer_gpu_open)
+    {
+        bk_ret = doorbell_compositor_gpu_open();
+        if (bk_ret != BK_OK)
+        {
+            LOGE("deferred compositor gpu open failed=%d\n", bk_ret);
+            goto fail_dec;
+        }
     }
 
     ret = bk_flexa_h264d_gpu_bond_start(&s_dl.bond, s_dl.decoder,
@@ -832,7 +1127,6 @@ fail_dec:
         (void)bk_h264_decode_delete(s_dl.decoder);
         s_dl.decoder = NULL;
     }
-fail_comp:
     doorbell_compositor_stop();
 fail_mgr:
     doorbell_downlink_img_manager_deinit();
@@ -843,8 +1137,12 @@ fail_pp:
         s_dl.pp_buf = NULL;
     }
     s_dl.pp_size = 0U;
-    /* Startup failed: restore the single-view preview we detached above. */
-    (void)doorbell_devices_preview_gpu_attach();
+    dl_pingpong_hold_clear();
+    /* Intercom rollback keeps uplink running briefly; do not attach preview GPU. */
+    if (!doorbell_devices_uplink_active() && s_dl_concurrent_uplink == 0U)
+    {
+        (void)doorbell_devices_preview_gpu_attach();
+    }
     return BK_FAIL;
 }
 

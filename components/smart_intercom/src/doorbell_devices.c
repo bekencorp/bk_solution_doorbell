@@ -8,7 +8,6 @@
 #include "doorbell_devices_intercom.h"
 #include "doorbell_downlink_video.h"
 #include "network_transfer.h"
-#include "doorbell_selftest.h"
 #include "modules/wifi.h"
 #include "app_camera.h"
 #include "app_display.h"
@@ -47,6 +46,138 @@ typedef enum
 } lcd_status_t;
 
 db_device_info_t *db_device_info = NULL;
+
+/* Uplink profiles: single-direction matches doorbell_lp (1080p@25); intercom
+ * stays 720p@20 with SP PIP and GPU scale for downlink headroom. */
+#define DB_UPLINK_1080P_WIDTH   1920U
+#define DB_UPLINK_1080P_HEIGHT  1080U
+#define DB_UPLINK_720P_WIDTH    1280U
+#define DB_UPLINK_720P_HEIGHT   720U
+
+static camera_board_config_t s_mipi_board_baseline;
+static gpu_board_config_t    s_gpu_board_baseline;
+static bool                    s_mipi_board_baseline_saved;
+static bool                    s_preview_gpu_held;
+/* Uplink fps requested by the RPC layer for the next camera turn-on. Kept here
+ * (intercom-private) instead of in the shared camera_parameters_t so the common
+ * doorbell_devices.h ABI stays untouched. Consumed once by doorbell_camera_turn_on. */
+static uint16_t                s_uplink_fps_req;
+
+void doorbell_devices_preview_gpu_hold(bool hold)
+{
+    s_preview_gpu_held = hold;
+}
+
+void doorbell_devices_set_uplink_fps(uint16_t fps)
+{
+    s_uplink_fps_req = fps;
+}
+
+static bool doorbell_uplink_is_1080p(const camera_parameters_t *parameters)
+{
+    return parameters != NULL &&
+           parameters->width >= DB_UPLINK_1080P_WIDTH &&
+           parameters->height >= DB_UPLINK_1080P_HEIGHT;
+}
+
+static void doorbell_mipi_board_baseline_save_once(void)
+{
+    camera_board_config_t *cam = app_camera_board_config_get();
+    gpu_board_config_t *gpu = app_gpu_board_config_get();
+
+    if (s_mipi_board_baseline_saved || cam == NULL || gpu == NULL)
+    {
+        return;
+    }
+
+    os_memcpy(&s_mipi_board_baseline, cam, sizeof(s_mipi_board_baseline));
+    os_memcpy(&s_gpu_board_baseline, gpu, sizeof(s_gpu_board_baseline));
+    s_mipi_board_baseline_saved = true;
+}
+
+static void doorbell_mipi_board_baseline_restore(void)
+{
+    if (!s_mipi_board_baseline_saved)
+    {
+        return;
+    }
+
+    app_camera_board_config_set(&s_mipi_board_baseline);
+    app_gpu_board_config_set(&s_gpu_board_baseline);
+}
+
+/* Apply sensor/ISP/GPU board fields for the negotiated uplink resolution. */
+static void doorbell_apply_mipi_capture_profile(const camera_parameters_t *parameters)
+{
+    camera_board_config_t *cam = app_camera_board_config_get();
+    gpu_board_config_t *gpu = app_gpu_board_config_get();
+
+    if (cam == NULL || gpu == NULL || parameters == NULL)
+    {
+        return;
+    }
+
+    doorbell_mipi_board_baseline_save_once();
+
+    if (doorbell_uplink_is_1080p(parameters))
+    {
+        cam->mipi.sensor_max_width = DB_UPLINK_1080P_WIDTH;
+        cam->mipi.sensor_max_height = DB_UPLINK_1080P_HEIGHT;
+        cam->isp.mp_width = DB_UPLINK_1080P_WIDTH;
+        cam->isp.mp_height = DB_UPLINK_1080P_HEIGHT;
+        cam->isp.sp_enable = false;
+
+        gpu->flexa.src_width = DB_UPLINK_1080P_WIDTH;
+        gpu->flexa.src_height = DB_UPLINK_1080P_HEIGHT;
+        gpu->flexa.dst_width = DB_UPLINK_1080P_WIDTH;
+        gpu->flexa.dst_height = DB_UPLINK_1080P_HEIGHT;
+        gpu->flexa.scale = false;
+    }
+    else
+    {
+        cam->mipi.sensor_max_width = DB_UPLINK_720P_WIDTH;
+        cam->mipi.sensor_max_height = DB_UPLINK_720P_HEIGHT;
+        cam->isp.mp_width = DB_UPLINK_720P_WIDTH;
+        cam->isp.mp_height = DB_UPLINK_720P_HEIGHT;
+
+        gpu->flexa.src_width = DB_UPLINK_720P_WIDTH;
+        gpu->flexa.src_height = DB_UPLINK_720P_HEIGHT;
+
+        if (s_preview_gpu_held)
+        {
+            /* Two-way intercom: the downlink compositor owns the GPU/panel and the
+             * ISP SP feeds the local self-view PIP. The GPU flexa dst here is read
+             * by doorbell_display_compositor as the compositor output geometry AND
+             * by dl_fill_pip_cfg to place the PIP. Target the 720x1280 portrait
+             * panel: pre-rotation dst = 1280x720 (long,short), rotate 90 -> the DPU
+             * scans out 720x1280 (same convention as app_gpu_v2_turn_on and the
+             * single-direction preview). Main src = decoded 720p downlink (1280x720)
+             * so the compositor blit is 1:1 (no scale). */
+            cam->isp.sp_enable = true;
+            cam->isp.sp_flexa = false;
+            cam->isp.sp_width = 320;
+            cam->isp.sp_height = 180;
+
+            gpu->flexa.dst_width = DB_UPLINK_720P_WIDTH;
+            gpu->flexa.dst_height = DB_UPLINK_720P_HEIGHT;
+            gpu->flexa.scale = false;
+            gpu->flexa.degree = 90;
+        }
+        else
+        {
+            /* Single-direction 720P preview: no PIP. Rotate the 1280x720 camera
+             * 90deg onto the 720x1280 portrait panel, 1:1 (no scale). Both dims
+             * are 16-aligned so the compressed output scans out cleanly. */
+            cam->isp.sp_enable = false;
+
+            gpu->flexa.dst_width = DB_UPLINK_720P_WIDTH;
+            gpu->flexa.dst_height = DB_UPLINK_720P_HEIGHT;
+            gpu->flexa.scale = false;
+            gpu->flexa.degree = 90;
+        }
+    }
+
+}
 
 void *doorbell_devices_isp_handle_get(void)
 {
@@ -110,14 +241,64 @@ static bk_err_t doorbell_apply_h264_qp_preset(void *encode_handle)
     ret = bk_h264_encode_set_rate_ctrl((bk_h264_encode_ctlr_handle_t)encode_handle, &rate_ctrl);
     if (ret != AVDK_ERR_OK)
     {
-        LOGE("%s, apply h264 qp preset failed, ret = %d\n", __func__, ret);
+        LOGE("h264 qp preset %s failed: %d\n", preset_name, ret);
         return BK_FAIL;
     }
 
-    LOGI("h264 qp preset %s: bitrate=%u i=[%u,%u] p=[%u,%u]\n",
-         preset_name, rate_ctrl.bitrate, rate_ctrl.qp_min_i, rate_ctrl.qp_max_i,
-         rate_ctrl.qp_min_p, rate_ctrl.qp_max_p);
+    LOGW("h264 qp preset %s: bitrate=%u i=[%u,%u] p=[%u,%u]\n",
+         preset_name,
+         (unsigned)rate_ctrl.bitrate,
+         (unsigned)rate_ctrl.qp_min_i, (unsigned)rate_ctrl.qp_max_i,
+         (unsigned)rate_ctrl.qp_min_p, (unsigned)rate_ctrl.qp_max_p);
+    return BK_OK;
+}
 
+/* 1080p single-direction uses doorbell_lp Quality (2Mbps); 720p intercom keeps
+ * Balanced (1.5Mbps) regardless of the compile-time default preset. */
+static bk_err_t doorbell_apply_h264_qp_preset_uplink(void *encode_handle,
+                                                     uint16_t width,
+                                                     uint16_t height)
+{
+    bk_h264_encode_rate_ctrl_t rate_ctrl = {0};
+    const char *preset_name;
+    avdk_err_t ret;
+
+    if (encode_handle == NULL)
+    {
+        return BK_ERR_PARAM;
+    }
+
+    if (width >= DB_UPLINK_1080P_WIDTH && height >= DB_UPLINK_1080P_HEIGHT)
+    {
+        preset_name = "quality";
+        rate_ctrl.bitrate = 2000000;
+        rate_ctrl.qp_min_i = 20;
+        rate_ctrl.qp_max_i = 40;
+        rate_ctrl.qp_min_p = 24;
+        rate_ctrl.qp_max_p = 40;
+    }
+    else
+    {
+        preset_name = "balanced";
+        rate_ctrl.bitrate = 1500000;
+        rate_ctrl.qp_min_i = 20;
+        rate_ctrl.qp_max_i = 51;
+        rate_ctrl.qp_min_p = 26;
+        rate_ctrl.qp_max_p = 51;
+    }
+
+    ret = bk_h264_encode_set_rate_ctrl((bk_h264_encode_ctlr_handle_t)encode_handle, &rate_ctrl);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("h264 uplink preset %s failed: %d\n", preset_name, ret);
+        return BK_FAIL;
+    }
+
+    LOGW("h264 uplink preset %s: bitrate=%u i=[%u,%u] p=[%u,%u]\n",
+         preset_name,
+         (unsigned)rate_ctrl.bitrate,
+         (unsigned)rate_ctrl.qp_min_i, (unsigned)rate_ctrl.qp_max_i,
+         (unsigned)rate_ctrl.qp_min_p, (unsigned)rate_ctrl.qp_max_p);
     return BK_OK;
 }
 #endif
@@ -167,9 +348,6 @@ int doorbell_get_supported_lcd_devices(int opcode)
     evt->flags = EVT_FLAGS_CONTINUE;
 
     LOGD("DBCMD_GET_LCD_SUPPORTED_DEVICES\n");
-
-    // sprintf(p, "{\"name\": \"%s\", \"id\": \"%d\", \"type\": \"%s\", \"ppi\":\"%dX%d\"}",
-    //     "aml01", LCD_PANEL_AML01, "rgb", 720, 1280);
 
     evt->length = CHECK_ENDIAN_UINT16(strlen(p));
 
@@ -413,6 +591,9 @@ int doorbell_devices_preview_gpu_attach(void)
 int doorbell_camera_turn_on(camera_parameters_t *parameters)
 {
     bk_err_t ret = BK_FAIL;
+    /* Consume the RPC-requested uplink fps once (0 = board default). */
+    uint16_t req_uplink_fps = s_uplink_fps_req;
+    s_uplink_fps_req = 0U;
     LOGD("%s, id: %d, %d X %d, format: %d, Protocol: %d\n", __func__,
          parameters->id, parameters->width, parameters->height,
          parameters->format, parameters->protocol);
@@ -510,7 +691,20 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
     }
     else
     {
-        ret = app_isp_mipi_camera_turn_on(app_camera_board_config_get());
+        camera_board_config_t *board = app_camera_board_config_get();
+        uint16_t board_fps = board->mipi.sensor_fps;
+
+        doorbell_apply_mipi_capture_profile(parameters);
+
+        if (req_uplink_fps != 0)
+        {
+            board->mipi.sensor_fps = (req_uplink_fps <= board_fps) ?
+                                     req_uplink_fps : board_fps;
+        }
+
+        ret = app_isp_mipi_camera_turn_on(board);
+
+        board->mipi.sensor_fps = board_fps;
 
         if (ret != BK_OK)
         {
@@ -547,7 +741,9 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
         }
 
 #if CONFIG_H264_QP_PRESET_QUALITY || CONFIG_H264_QP_PRESET_FIXED_QP || CONFIG_H264_QP_PRESET_BALANCED || CONFIG_H264_QP_PRESET_ANTI_STUTTER || CONFIG_H264_QP_PRESET_LAN_HD
-        ret = doorbell_apply_h264_qp_preset(info->encode_handle);
+        ret = doorbell_apply_h264_qp_preset_uplink(info->encode_handle,
+                                                   parameters->width,
+                                                   parameters->height);
         if (ret != BK_OK)
         {
             goto err;
@@ -565,7 +761,7 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
         (void)bk_snapshot_sw_prepare();
 #endif
 
-        if (info->lcd_enable) {
+        if (info->lcd_enable && !s_preview_gpu_held) {
             ret = gpu_pipeline_attach(info);
             if (ret != BK_OK) {
                 LOGE("%s, gpu_pipeline_attach failed, ret = %d\n", __func__, ret);
@@ -591,11 +787,10 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
 
     info->video_enable = true;
 
-    LOGD("%s success\n", __func__);
-
     return BK_OK;
 
 err:
+    doorbell_mipi_board_baseline_restore();
     gpu_pipeline_detach(info);
 
     if (info->camera_id == UVC_DEVICE_ID)
@@ -708,6 +903,7 @@ int doorbell_camera_turn_off(void)
 #endif
         ret = app_isp_camera_turn_off();
 
+        doorbell_mipi_board_baseline_restore();
     }
 
     if (ret != BK_OK)
@@ -717,7 +913,6 @@ int doorbell_camera_turn_off(void)
         return ret;
     }
     info->video_enable = false;
-    LOGD("%s success\n", __func__);
 
     return ret;
 }
@@ -740,10 +935,6 @@ int doorbell_video_transfer_turn_on(void)
     }
 
     ret = doorbell_devices_start(info->transfer_format);
-    if (ret == BK_OK)
-    {
-        LOGD("%s, success\n", __func__);
-    }
 
     return ret;
 }
@@ -765,12 +956,6 @@ int doorbell_video_transfer_turn_off(void)
     }
 
     ret = doorbell_devices_stop();
-    if (ret == BK_OK)
-    {
-        LOGD("%s, success\n", __func__);
-    }
-
-   // ntwk_trans_cs2_video_timer_deinit();
 
     return ret;
 }
@@ -899,11 +1084,8 @@ int doorbell_display_turn_on(display_board_config_t *config)
 
     db_device_info_t *info = db_device_info;
 
-    //LOGD("%s, id: %d, rotate: %d fmt: %d\n", __func__, parameters->id, parameters->rotate_angle, parameters->pixel_format);
-
     if (info->lcd_enable == true)
     {
-        //LOGD("%s, id: %d already open\n", __func__, parameters->id);
         return ret;
     }
 
@@ -927,7 +1109,6 @@ int doorbell_display_turn_on(display_board_config_t *config)
         }
     }
 
-    LOGD("%s success\n", __func__);
     return BK_OK;
 
 error:
@@ -938,7 +1119,6 @@ error:
         LOGE("%s, app_mipi_lcd_turn_off failed, ret = %d\n", __func__, ret);
     }
     info->lcd_enable = false;
-    LOGD("%s failed\n", __func__);
     return BK_FAIL;
 }
 
@@ -949,7 +1129,6 @@ int doorbell_display_turn_off(void)
 
     if (info->lcd_enable == false)
     {
-        LOGD("%s, %d already close\n", __func__);
         return EVT_STATUS_ALREADY;
     }
 
@@ -963,7 +1142,6 @@ int doorbell_display_turn_off(void)
     }
 
     info->lcd_enable = false;
-    LOGD("%s success\n", __func__);
 
     return ret;
 }
@@ -1036,8 +1214,6 @@ bk_err_t doorbell_devices_stop(void)
     os_free(s_db_trans_cfg);
     s_db_trans_cfg = NULL;
 
-    LOGD("%s, close success!\r\n", __func__);
-
     return BK_OK;
 }
 
@@ -1094,10 +1270,6 @@ static void doorbell_devices_task_entry(beken_thread_arg_t data)
 
         log_enable = 0;
 
-        /* Self-test loopback: when armed, feed a copy of this encoded AU to the
-         * downlink decode path (no-op unless "db_selftest downlink on"). */
-        doorbell_selftest_downlink_tee_feed(frame->frame, frame->length);
-
         if (cfg->port_id == 0)
         {
             ret = ntwk_trans_video_send((uint8_t *)frame, frame->length, cfg->img_format);
@@ -1108,7 +1280,6 @@ static void doorbell_devices_task_entry(beken_thread_arg_t data)
         }
         else
         {
-            // if (frame->h264_type == cfg->port_id)
             {
                 ret = ntwk_trans_video_send((uint8_t *)frame, frame->length, BK_IMAGE_FORMAT_H264);
                 if (ret != BK_OK)

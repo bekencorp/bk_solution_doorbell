@@ -30,6 +30,19 @@ typedef struct
     uint16_t pip_dst_x;    /**< overlay origin X on the composed surface */
     uint16_t pip_dst_y;    /**< overlay origin Y on the composed surface */
     uint16_t pip_rotate;   /**< overlay rotate degree (0/90/180/270)     */
+
+    /** When true, skip the 3-buffer UNCODED output pool during @ref
+     * doorbell_compositor_start and call @ref doorbell_compositor_out_pool_init
+     * after the H.264 decoder opens. Concurrent uplink + downlink intercom needs
+     * this: decoder open only needs ~4KB UNCODED and must run before the ~6MB
+     * pool is reserved. */
+    bool     defer_out_pool;
+
+    /** When true, stop after @c bk_gpu_init and call @ref doorbell_compositor_gpu_open
+     * after the H.264 decoder opens (and after the deferred output pool, if any).
+     * Concurrent intercom needs this so @c bk_gpu_open does not grab a ~2MB UNCODED
+     * dpu_frame_buffer before @c vcdec_h264_open runs. */
+    bool     defer_gpu_open;
 } doorbell_compositor_config_t;
 
 /**
@@ -47,6 +60,22 @@ typedef struct
 bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
                                    uint8_t *flexa_ring,
                                    uint8_t flexa_buf_count);
+
+/**
+ * @brief Allocate the compositor GPU output pool deferred by defer_out_pool.
+ *
+ * Must be called after the H.264 decoder is open when defer_out_pool was set.
+ * No-op if the pool was already initialized during start.
+ */
+bk_err_t doorbell_compositor_out_pool_init(void);
+
+/**
+ * @brief Finish compositor startup deferred by defer_gpu_open.
+ *
+ * Releases the HSRAM ping-pong hold, calls @c bk_gpu_open, and starts PIP if
+ * configured. Must run after the H.264 decoder (and deferred output pool) are up.
+ */
+bk_err_t doorbell_compositor_gpu_open(void);
 
 /**
  * @brief Enable the PIP self-view overlay on an already-running compositor.
@@ -80,6 +109,14 @@ bk_gpu_ctlr_handle_t doorbell_compositor_gpu_handle_get(void);
 
 /** @brief Whether the compositor pipeline is currently running. */
 bool doorbell_compositor_is_running(void);
+
+/**
+ * @brief HSRAM ping-pong strip size the compositor GPU needs (compressed flexa path).
+ *
+ * Mirrors bk_gpu_ctlr_default.c gpu_flex_init_pingpong_buffer() so the downlink
+ * layer can budget HSRAM before allocating the FLEXA decode ring.
+ */
+uint32_t doorbell_compositor_gpu_pingpong_bytes(uint16_t dst_w, uint16_t dst_h);
 
 #ifdef __cplusplus
 }

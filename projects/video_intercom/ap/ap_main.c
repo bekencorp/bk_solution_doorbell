@@ -18,11 +18,10 @@
 #include "doorbell_comm.h"
 #include "doorbell_config.h"
 #endif
-#include <lcd/lcd_mipi_hx8399c_1080x1920.h>
+#include <lcd/lcd_mipi_er68576b_720x1280.h>
 #include <doorbell_comm.h>
 #include "doorbell_ipc_msg.h"
 #include "doorbell_keepalive.h"
-#include "doorbell_selftest.h"
 #include "ui/doorbell_ui.h"
 #include "doorbell_netcfg.h"
 #include "components/bluetooth/bk_dm_bluetooth.h"
@@ -110,34 +109,22 @@ int main(void)
     camera_board.mipi.pin_reset = GPIO_71;
     camera_board.mipi.pin_pwdn = -1;
     camera_board.mipi.pin_xclk = GPIO_59;
-    camera_board.mipi.sensor_max_width = 1920;
-    camera_board.mipi.sensor_max_height = 1080;
-    /* gc2053 1920x1080@15 is a supported sensor mode; 15fps lowers pixel
-     * throughput so the concurrent uplink-encode + downlink-decode + GPU
-     * composite (+ PIP) pipeline has more per-frame budget for validation. */
-    camera_board.mipi.sensor_fps = 15;
+    /* Board default = single-direction uplink for the 720x1280 portrait panel:
+     * gc2053 1280x720@30, ISP MP 1:1, GPU rotate-only (1280x720 -> 720x1280, no
+     * scale). doorbell_devices.c overrides SP/GPU for the two-way intercom. */
+    camera_board.mipi.sensor_max_width = 1280;
+    camera_board.mipi.sensor_max_height = 720;
+    camera_board.mipi.sensor_fps = 30;
     camera_board.mipi.hmirror = 0;
     camera_board.mipi.vflip = 0;
     camera_board.isp.mp_enable = true;
     camera_board.isp.mp_flexa = true;
-    /* Uplink encode source = ISP MP. 1280x720 (16:9, 1.5x downscale of 1080p
-     * sensor) for phone-side HD preview. Both dimensions MUST be multiples of
-     * 16 (720/16=45 FLEXA rows). Downlink decode uses the same 720p class size
-     * but is a separate h264d path (shallow DL_SEG_NUM ring); SP stays low-res
-     * for the local PIP self-view only. */
     camera_board.isp.mp_width = 1280;
     camera_board.isp.mp_height = 720;
     camera_board.isp.mp_format = BK_PIXEL_FORMAT_NV12;
-    /* SP channel feeds the downlink PIP self-view (local camera small window).
-     * Reduced to 320x180 (was 640x360): with the concurrent dual-720p pipeline
-     * the 640x360@15fps self-view overloaded the GPU compositor / PSRAM bandwidth
-     * and caused downlink frame drops. 320x180 is 1/4 the pixels -> ~4x lighter
-     * SP write + PIP blit, self-view frame rate unchanged. SP is a non-flexa
-     * channel (sp_flexa=false) so it is NOT bound by the 16-line flexa/H.264
-     * macroblock rule that MP has: only the WIDTH must be 16-aligned for GPU/DMA
-     * stride (320/16=20) and both dims must be even for NV12 4:2:0 (180 is even).
-     * MUST stay equal to DL_PIP_WIDTH/HEIGHT in doorbell_downlink_video.c. */
-    camera_board.isp.sp_enable = true;
+    /* SP off in the single-direction default; enabled dynamically for intercom
+     * PIP (320x180, see doorbell_downlink_video.c / doorbell_devices.c). */
+    camera_board.isp.sp_enable = false;
     camera_board.isp.sp_flexa = false;
     camera_board.isp.sp_width = 320;
     camera_board.isp.sp_height = 180;
@@ -145,7 +132,7 @@ int main(void)
     display_board.mipi.enable = true;
     display_board.mipi.pin_reset = GPIO_60;
     display_board.mipi.pin_backlight = GPIO_7;
-    display_board.mipi.panel = &lcd_device_hx8399c_mipi_1080x1920;
+    display_board.mipi.panel = &lcd_device_er68576b_mipi_720x1280;
     display_board.dpu_video.enable = true;
     display_board.dpu_video.decompress = true;
     display_board.dpu_video.format = BK_PIXEL_FORMAT_ARGB8888;
@@ -153,17 +140,18 @@ int main(void)
 
     gpu_board.flexa.enable = true;
     gpu_board.flexa.degree = 90;
-    /* Preview src follows ISP MP (1280x720); dst stays panel pre-rotation
-     * 1920x1080, so the preview GPU scales 720p -> 1080P before the 90deg
-     * rotation. Must match camera_board.isp.mp_width/height (both /16). */
+    /* Single-direction preview: 1280x720 camera rotated 90deg onto the 720x1280
+     * portrait panel, 1:1 (no scale). Both 1280 and 720 are 16-aligned so the
+     * compressed output scans out cleanly. Intercom overrides src/dst/SP in
+     * doorbell_devices.c. */
     gpu_board.flexa.src_width = 1280;
     gpu_board.flexa.src_height = 720;
-    gpu_board.flexa.dst_width = 1920;
-    gpu_board.flexa.dst_height = 1080;
+    gpu_board.flexa.dst_width = 1280;
+    gpu_board.flexa.dst_height = 720;
     gpu_board.flexa.src_format = BK_PIXEL_FORMAT_NV12;
     gpu_board.flexa.dst_format = BK_PIXEL_FORMAT_ARGB8888;
     gpu_board.flexa.dst_compress = true;
-    gpu_board.flexa.scale = true;
+    gpu_board.flexa.scale = false;
     gpu_board.flexa.tess_width = 0;
     gpu_board.flexa.tess_height = 0;
 
@@ -189,9 +177,9 @@ int main(void)
          * visible screen-off flicker (see doorbell_ui_on_boot_media_done). */
         boot_img_cfg.display_mode        = BOOT_IMAGE_DISPLAY_KEEP_ON;
         boot_img_cfg.display_ops         = &s_boot_img_ops;
-        /* Boot image must be authored at panel native size (HX8399C 1080x1920). */
-        boot_img_cfg.panel_width         = 1080;
-        boot_img_cfg.panel_height        = 1920;
+        /* Boot image must be authored at panel native size (ER68576B 720x1280). */
+        boot_img_cfg.panel_width         = 720;
+        boot_img_cfg.panel_height        = 1280;
         boot_img_cfg.done_cb             = video_intercom_boot_media_done;
         if (boot_image_show(&boot_img_cfg) != BK_OK)
         {
@@ -208,9 +196,9 @@ int main(void)
          * seamlessly (see doorbell_ui_on_boot_media_done). */
         boot_cfg.display_mode  = BOOT_VIDEO_DISPLAY_KEEP_ON;
         boot_cfg.display_ops   = &s_boot_video_ops;
-        /* Panel native geometry (HX8399C MIPI 1080x1920), used for AUTO rotation. */
-        boot_cfg.panel_width   = 1080;
-        boot_cfg.panel_height  = 1920;
+        /* Panel native geometry (ER68576B MIPI 720x1280), used for AUTO rotation. */
+        boot_cfg.panel_width   = 720;
+        boot_cfg.panel_height  = 1280;
         boot_cfg.done_cb       = video_intercom_boot_media_done;
         if (boot_video_play(&boot_cfg) != BK_OK)
         {
@@ -260,8 +248,6 @@ int main(void)
 
     doorbell_ipc_wakeup_env_init();
     doorbell_keepalive_handle_wakeup_reason();
-    //doorbell_keepalive_cli_init();
-    doorbell_selftest_cli_init();
 
     /* Physical keys (K3-K6 ADC ladder). Started last, after core services
      * are up, so key handlers can safely call into them. No-op unless

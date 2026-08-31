@@ -53,9 +53,11 @@
 #define LOGW(...) BK_LOGW(TAG, ##__VA_ARGS__)
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
 
-/* Panel native geometry (HX8399C MIPI 1080x1920, matches ap_main display_board). */
-#define DB_UI_PANEL_WIDTH  (1080)
-#define DB_UI_PANEL_HEIGHT (1920)
+/* Panel native geometry (ER68576B MIPI 720x1280, matches ap_main display_board).
+ * Both dims are DPU-aligned (720%16==0, 1280%4==0) so compressed partial-refresh
+ * frames scan out without stride padding. */
+#define DB_UI_PANEL_WIDTH  (720)
+#define DB_UI_PANEL_HEIGHT (1280)
 
 #ifndef CONFIG_LVGL_FRAME_BUFFER_NUM
 #define CONFIG_LVGL_FRAME_BUFFER_NUM (2)

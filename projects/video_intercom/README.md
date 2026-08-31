@@ -30,7 +30,6 @@ CPU split:
 | PIP inset | ISP SP self-view (640×360) overlaid top-right of the downlink main picture |
 | Downlink zero-copy | `CONFIG_SMART_INTERCOM_DL_ZEROCOPY`: network fragments reassembled directly into decode slots, saving one copy |
 | Low-power keepalive | reuses the CP keepalive path (AP power-down + TCP heartbeat) to lower idle power |
-| Self-test harness | `db_selftest` CLI: loops the local uplink encoded bitstream back into the downlink decode/display without an APK |
 
 ### 2.1 vs standard doorbell
 
@@ -68,7 +67,6 @@ The options in `ap/config/bk7259_ap/defconfig` that distinguish it from standard
 ```ini
 CONFIG_INTEGRATION_DOORBELL=y
 CONFIG_SMART_INTERCOM=y                 # enable the smart_intercom component
-CONFIG_SMART_INTERCOM_AUTO_TEST=y       # compile the db_selftest self-loopback harness
 CONFIG_SMART_INTERCOM_DL_ZEROCOPY=y     # downlink video zero-copy
 CONFIG_NTWK_CLIENT_SERVICE_ENABLE=y
 CONFIG_NTWK_CTRL_CHAN_JSON=y            # control channel uses JSON
@@ -84,26 +82,12 @@ CONFIG_H264_QP_PRESET_QUALITY=y         # 2 Mbps quality preset
 3. The device uplinks the local camera while decoding and displaying the remote downlink video, with the local self-view as a PIP inset in the top-right corner.
 4. Full-duplex audio connects — a video intercom session.
 
-### 3.5 Self-test (no APK)
-
-Use the `db_selftest` CLI to loop the uplink encoded bitstream back into the downlink decode/display, to quickly validate the decode/composite/PIP path:
-
-```text
-db_selftest help                 # help
-db_selftest lcd on               # turn on LCD
-db_selftest cam on               # turn on camera (uplink encode)
-db_selftest downlink on [loops]  # arm uplink->downlink loopback (loops=0 = forever)
-db_selftest downlink off         # disarm loopback and stop downlink pipeline
-db_selftest rpc <preset>         # inject preset JSON-RPC (ping/getconfig/camstatus...)
-db_selftest rpc raw {json}       # inject custom JSON-RPC
-```
-
 ## 4 Layout
 
 ```
 projects/video_intercom
 ├── ap/
-│   ├── ap_main.c                 # AP board config (MIPI camera/LCD/GPU) + doorbell init + selftest CLI
+│   ├── ap_main.c                 # AP board config (MIPI camera/LCD/GPU) + doorbell init
 │   ├── audio_param/              # audio params
 │   └── config/bk7259_ap/defconfig
 ├── cp/
@@ -141,8 +125,6 @@ components/smart_intercom
 │   ├── doorbell_display_compositor.c # PIP compositor (main picture + self-view)
 │   ├── doorbell_isp_sp.c             # ISP SP channel (self-view)
 │   └── doorbell_keepalive.c          # AP-side keepalive trigger
-└── auto_test/
-    └── doorbell_selftest.c           # db_selftest self-loopback harness
 ```
 
 ## 5 Implementation
@@ -325,13 +307,6 @@ void  doorbell_devices_preview_gpu_attach(void);
 void  doorbell_devices_force_idr(void);
 ```
 
-**Self-test** (`auto_test/doorbell_selftest.h`):
-
-```c
-int  doorbell_selftest_cli_init(void);
-void doorbell_selftest_downlink_tee_feed(const uint8_t *data, uint32_t len); /* no-op when AUTO_TEST off */
-```
-
 ## 7 FAQ
 
 **Q: Can video_intercom and doorbell be built into the same image?**
@@ -341,10 +316,6 @@ A: No. The `smart_intercom` Kconfig makes `smart_lock` satisfy `depends on !SMAR
 **Q: Why is the downlink video size fixed at 256×144? Can it be larger?**
 
 A: It is limited by HSRAM size. 256×144 is the HSRAM-safe size that fits a full-frame FLEXA ring; larger sizes cause ring wrap, h264d→GPU de-sync, and `VCDEC_DEC_INT_ERROR`. Both dimensions must be multiples of 16.
-
-**Q: How to validate downlink decode and PIP without an APP?**
-
-A: Use `db_selftest downlink on` to loop the local uplink encoded bitstream back into the downlink decode/display (requires `CONFIG_SMART_INTERCOM_AUTO_TEST=y`).
 
 **Q: What protocol does the control channel use?**
 

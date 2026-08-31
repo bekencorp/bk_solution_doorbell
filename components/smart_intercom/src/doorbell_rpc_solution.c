@@ -23,9 +23,10 @@
  *
  * configs enumerates the methods this solution supports, each with a default
  * parameter template the app can use as-is. Values mirror the actual
- * video_intercom board pipeline: gc2053 MIPI sensor -> ISP MP 1280x720 h264
- * uplink; hx8399c 1080x1920 MIPI panel; 16 kHz PCM two-way audio (AEC on);
- * h264 downlink image stream (1280x720); ISP SP 640x360 for local PIP only.
+ * video_intercom board pipeline: gc2053 MIPI sensor -> ISP MP h264 uplink
+ * @1920x1080@25fps (single camera.turnOn, same as doorbell_lp) /
+ * @1280x720@20fps (videoIntercom); hx8399c panel; 16 kHz PCM two-way audio
+ * (AEC on); h264 downlink (1280x720 @20fps); ISP SP 320x180 for intercom PIP.
  * See ap/ap_main.c for the board setup.
  */
 
@@ -151,10 +152,10 @@ static cJSON *p_lcd_turn_on(void)
         if (mipi != NULL) cJSON_Delete(mipi);
         return p;
     }
-    cJSON_AddStringToObject(mipi, "sensorName", "hx8399c");
+    cJSON_AddStringToObject(mipi, "sensorName", "er68576b");
     cJSON_AddNumberToObject(mipi, "sensorId", 1);
-    cJSON_AddNumberToObject(mipi, "width", 1080);
-    cJSON_AddNumberToObject(mipi, "height", 1920);
+    cJSON_AddNumberToObject(mipi, "width", 720);
+    cJSON_AddNumberToObject(mipi, "height", 1280);
     cJSON_AddItemToObject(cfg, "mipi", mipi);
     cJSON_AddItemToObject(p, "lcdConfig", cfg);
     return p;
@@ -182,20 +183,21 @@ static cJSON *p_image_set_recv_config(void)
     }
     cJSON_AddNumberToObject(h264, "width", (int)DOORBELL_DL_MAIN_WIDTH);
     cJSON_AddNumberToObject(h264, "height", (int)DOORBELL_DL_MAIN_HEIGHT);
-    /* Downlink (phone -> device) capture rate negotiated with the App. Once the
-     * App sends a clean contiguous IPPP stream (no mid-GOP encoded-frame drops),
-     * decode is stable with no reference-chain breaks, so the rate can be raised
-     * from 10 to 20 fps for smoother playback. The decode+GPU+compose stage must
-     * still keep up. At 1280x720, 15fps leaves more decode budget per frame than
-     * 20fps. */
-    cJSON_AddNumberToObject(h264, "fps", 15);
+    /* Downlink (phone -> device) capture rate negotiated with the App.
+     * The consumer ceiling is the GPU compositor: it rotates+compresses each
+     * decoded 1280x720 frame into the 720x1280 panel output (degree=90, no
+     * upscale now that the panel is 720p). Measured bonded decode+GPU cost is
+     * ~40-41ms/frame -> ~24.4fps ceiling. 25fps overshot it (continuous skip +
+     * keyframe-request storm); 24fps sits just under the ceiling so producer
+     * stays <= consumer and the 6-slot ready ring does not overflow. */
+    cJSON_AddNumberToObject(h264, "fps", 24);
     cJSON_AddNumberToObject(h264, "pFrameCount", 29);
     cJSON_AddItemToObject(fc, "h264", h264);
     cJSON_AddItemToObject(p, "formatConfig", fc);
     return p;
 }
 
-static cJSON *p_camera_turn_on(void)
+static cJSON *p_camera_turn_on_with_config(int width, int height, int fps)
 {
     cJSON *p = cJSON_CreateObject();
     cJSON *streams;
@@ -223,9 +225,9 @@ static cJSON *p_camera_turn_on(void)
     }
     cJSON_AddStringToObject(mipi, "sensorName", "gc2053");
     cJSON_AddNumberToObject(mipi, "sensorId", 1);
-    cJSON_AddNumberToObject(mipi, "width", 1280);
-    cJSON_AddNumberToObject(mipi, "height", 720);
-    cJSON_AddNumberToObject(mipi, "fps", 15);
+    cJSON_AddNumberToObject(mipi, "width", width);
+    cJSON_AddNumberToObject(mipi, "height", height);
+    cJSON_AddNumberToObject(mipi, "fps", fps);
     cJSON_AddStringToObject(mipi, "videoFormat", "h264");
     cJSON_AddNumberToObject(mipi, "rotate", 0);
     cJSON_AddItemToObject(ccfg, "mipi", mipi);
@@ -235,6 +237,13 @@ static cJSON *p_camera_turn_on(void)
     cJSON_AddItemToArray(streams, stream);
     cJSON_AddItemToObject(p, "streams", streams);
     return p;
+}
+
+/* Single-direction image transfer default: 1280x720 (720P) @30fps, matching the
+ * gc2053 720p30 sensor mode and the 720x1280 portrait panel (GPU rotate 90). */
+static cJSON *p_camera_turn_on(void)
+{
+    return p_camera_turn_on_with_config(1280, 720, 30);
 }
 
 /* doorbell.videoIntercom.turnOn : one-shot two-way intercom. Its params reuse
@@ -251,7 +260,10 @@ static cJSON *p_video_intercom_turn_on(void)
         return NULL;
     }
 
-    uplink = p_camera_turn_on();
+    /* Intercom uplink: 720p@30fps (gc2053 native 720p30 mode, sensor_fps=30 on
+     * this board; the uplink encoder sustained 25fps cleanly so 30 has margin).
+     * Single camera.turnOn uses 1080p@25 above. */
+    uplink = p_camera_turn_on_with_config(1280, 720, 30);
     downlink = p_image_set_recv_config();
     if (uplink != NULL)
     {

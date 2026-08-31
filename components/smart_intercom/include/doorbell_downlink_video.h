@@ -20,6 +20,13 @@ extern "C" {
 #define DOORBELL_DL_MAIN_WIDTH   1920U
 #define DOORBELL_DL_MAIN_HEIGHT  1080U
 #else
+/* Landscape 1280x720 downlink. The GPU compositor scales to 1920x1080 and
+ * rotates 90deg onto the 1080x1920 panel. Rotation is mandatory here: the panel
+ * width 1080 is NOT 16-aligned, so a non-rotated portrait output would be forced
+ * to a 1088-wide compressed buffer whose scan-out stride no longer matches the
+ * panel -> "DC panel0 data underflow" -> pipeline stall (see git history). The
+ * rotated pipeline uses the 16-aligned 1920 dimension as the buffer width and
+ * scans out cleanly. */
 #define DOORBELL_DL_MAIN_WIDTH   1280U
 #define DOORBELL_DL_MAIN_HEIGHT  720U
 #endif
@@ -77,6 +84,23 @@ bk_err_t doorbell_downlink_pip_disable(void);
 
 /** @brief Whether the downlink decode pipeline is running. */
 bool doorbell_downlink_video_is_running(void);
+
+/**
+ * @brief Hint that uplink capture/encode will share HSRAM with the downlink.
+ *
+ * Set before doorbell_downlink_set_h264_receive_config() in videoIntercom so
+ * the FLEXA ring depth budgets room for the compositor GPU ping-pong even when
+ * the uplink has not been opened yet.
+ */
+void doorbell_downlink_set_concurrent_uplink(bool expect);
+
+/**
+ * @brief Release HSRAM reserved for the compositor GPU ping-pong.
+ *
+ * Called by the display compositor immediately before bk_gpu_open() so the SDK
+ * allocator can claim the same contiguous block.
+ */
+void doorbell_downlink_release_pingpong_hold(void);
 
 /**
  * @brief Producer lost an access unit because no decode slot was free.

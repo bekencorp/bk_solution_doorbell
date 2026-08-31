@@ -307,8 +307,6 @@ void doorbell_keepalive_handle_wakeup_reason(void)
     switch (wakeup_reason) {
         case POWERUP_POWER_WAKEUP_FLAG:
             // Normal power-on startup, delete previously stored flash info
-            //LOGI("%s: Normal power-on startup\n", __func__);
-
             #if 0
             if (doorbell_del_all_info_from_flash() != BK_OK) {
                 LOGW("%s: Failed to del all info from flash\n", __func__);
@@ -318,8 +316,6 @@ void doorbell_keepalive_handle_wakeup_reason(void)
             break;
 
         case POWERUP_MULTIMEDIA_WAKEUP_HOST_FLAG:
-            //LOGI("%s: Wake up request detected\n", __func__);
-
             // 1. Disable Bluetooth
             ret = doorbell_keepalive_disable_bluetooth();
             if (ret != BK_OK) {
@@ -342,12 +338,10 @@ void doorbell_keepalive_handle_wakeup_reason(void)
             }
             // 4. Store pending command to send after service starts
             s_keepalive_env.pending_wakeup_cmd = DBCMD_WAKE_UP_REQUEST;
-            //LOGI("%s: Will send DBCMD_WAKE_UP_REQUEST after service starts\n", __func__);
             break;
 
         case POWERUP_KEEPALIVE_DISCONNECTION:
 
-            //LOGI("%s: Keepalive establishment failed, re-enabling service\n", __func__);
             s_keepalive_env.pending_keepalive_after_service_stop = false;
             ret = doorbell_keepalive_start_service_from_flash();
             if (ret != BK_OK) {
@@ -356,7 +350,6 @@ void doorbell_keepalive_handle_wakeup_reason(void)
             break;
 
         case POWERUP_KEEPALIVE_FAIL_WAKEUP_FLAG:
-           // LOGI("%s: Keepalive failure wakeup, disable BT and start service\n", __func__);
             ret = doorbell_keepalive_disable_bluetooth();
             if (ret != BK_OK) {
                 LOGE("%s: Failed to disable Bluetooth\n", __func__);

@@ -1,6 +1,6 @@
 set(incs .)
 
-set(srcs ap_main.c key_map.c ui/doorbell_ui.c ui/ui_home_feed_img.c )
+set(srcs ap_main.c key_map.c ui/doorbell_ui.c )
 
 if (CONFIG_AUD_PARAM_CTRL)
     list(APPEND incs ./audio_param)
@@ -12,14 +12,11 @@ endif()
 # replaced as a whole directory after re-exporting from the PC tool.
 include(${CMAKE_CURRENT_LIST_DIR}/beken_generated/beken_generated.cmake)
 
-# The Designer exported the home-page camera mockup as a full 1024x1536 RGB565A8
-# C bitmap (~4.5MB in flash). RGB565A8 does not fit even after resizing OTA, so
-# drop the generated file and link ui/ui_home_feed_img.c instead: the SAME symbol
-# re-encoded as plain RGB565 (~3.0MB; the alpha plane was fully opaque, dropped),
-# which fits once the AP partition is enlarged (see partitions/bk7259). home_init.c
-# stays unchanged. Regenerate ui_home_feed_img.c after re-exporting the UI.
-list(FILTER BEKEN_GENERATOR_SOURCES EXCLUDE REGEX "door_cam_1024x1536_RGB565A8_NONE")
-
+# 720x1280 UI: the home-page camera mockup is the generated 683x1024 RGB565A8 C
+# bitmap (~2.0MB in flash), which fits the enlarged AP partition directly (see
+# partitions/bk7259). No re-encoding workaround is needed anymore (the previous
+# 1024x1536 RGB565A8 was ~4.5MB and had to be re-encoded to RGB565); the smaller
+# portrait asset is linked straight from beken_generated/image.
 list(APPEND srcs ${BEKEN_GENERATOR_SOURCES})
 list(APPEND incs ${BEKEN_GENERATOR_INCLUDE_DIRS})
 

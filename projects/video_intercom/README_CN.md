@@ -30,7 +30,6 @@ CPU 分工：
 | PIP 画中画        | ISP SP 自拍画面（640×360）叠加在下行主画面右上角                          |
 | 下行视频零拷贝    | `CONFIG_SMART_INTERCOM_DL_ZEROCOPY`：网络分片直接重组进解码槽，省去一次拷贝 |
 | 低功耗保活        | 复用 CP 侧 keepalive（AP 掉电 + TCP 心跳），空闲时降功耗                    |
-| 自环测试工具      | `db_selftest` CLI：无需 APK 即可把上行编码码流回环到下行解码显示           |
 
 ### 2.1 与标准 doorbell 的差异
 
@@ -68,7 +67,6 @@ SDK_DIR=/abs/path/to/bk_avdk_smp_release_4.0.1 ./dbuild.sh make bk7259 PROJECT=v
 ```ini
 CONFIG_INTEGRATION_DOORBELL=y
 CONFIG_SMART_INTERCOM=y                 # 启用 smart_intercom 组件
-CONFIG_SMART_INTERCOM_AUTO_TEST=y       # 编译 db_selftest 自环测试工具
 CONFIG_SMART_INTERCOM_DL_ZEROCOPY=y     # 下行视频零拷贝
 CONFIG_NTWK_CLIENT_SERVICE_ENABLE=y
 CONFIG_NTWK_CTRL_CHAN_JSON=y            # 控制通道走 JSON
@@ -84,26 +82,12 @@ CONFIG_H264_QP_PRESET_QUALITY=y         # 2Mbps 画质预设
 3. 设备上行本机摄像头画面，同时解码并显示对端下行视频，本机自拍以 PIP 小窗叠加在右上角。
 4. 双向音频接通，实现可视对讲。
 
-### 3.5 自环测试（无需 APK）
-
-在串口下用 `db_selftest` 把上行编码码流回环到下行解码显示，快速验证解码/合成/PIP 通路：
-
-```text
-db_selftest help                 # 帮助
-db_selftest lcd on               # 打开 LCD
-db_selftest cam on               # 打开摄像头（上行编码）
-db_selftest downlink on [loops]  # 开启上行->下行回环（loops=0 表示一直回环）
-db_selftest downlink off         # 关闭回环并停止下行通路
-db_selftest rpc <preset>         # 注入预置 JSON-RPC（ping/getconfig/camstatus...）
-db_selftest rpc raw {json}       # 注入自定义 JSON-RPC
-```
-
 ## 4 工程目录
 
 ```
 projects/video_intercom
 ├── ap/
-│   ├── ap_main.c                 # AP 板级配置（MIPI 摄像头/LCD/GPU）+ doorbell 初始化 + selftest CLI
+│   ├── ap_main.c                 # AP 板级配置（MIPI 摄像头/LCD/GPU）+ doorbell 初始化
 │   ├── audio_param/              # 音频参数
 │   └── config/bk7259_ap/defconfig
 ├── cp/
@@ -141,8 +125,6 @@ components/smart_intercom
 │   ├── doorbell_display_compositor.c # PIP 合成器（主画面 + 自拍小窗）
 │   ├── doorbell_isp_sp.c             # ISP SP 通道（自拍画面）
 │   └── doorbell_keepalive.c          # AP 侧保活触发
-└── auto_test/
-    └── doorbell_selftest.c           # db_selftest 自环测试
 ```
 
 ## 5 实现机制
@@ -325,13 +307,6 @@ void  doorbell_devices_preview_gpu_attach(void);
 void  doorbell_devices_force_idr(void);
 ```
 
-**自环测试**（`auto_test/doorbell_selftest.h`）：
-
-```c
-int  doorbell_selftest_cli_init(void);
-void doorbell_selftest_downlink_tee_feed(const uint8_t *data, uint32_t len); /* AUTO_TEST 关闭时为 no-op */
-```
-
 ## 7 常见问题
 
 **Q: video_intercom 和 doorbell 能同时编到一个固件吗？**
@@ -341,10 +316,6 @@ A: 不能。`smart_intercom` 的 Kconfig 使 `smart_lock` 满足 `depends on !SM
 **Q: 下行视频尺寸为什么固定 256×144？能放大吗？**
 
 A: 受 HSRAM 大小限制。256×144 是能放下整帧 FLEXA 环的 HSRAM 安全尺寸；放大会导致环回绕、h264d→GPU 失步、解码报 `VCDEC_DEC_INT_ERROR`。两维都须为 16 的倍数。
-
-**Q: 没有 APP 如何验证下行解码和 PIP？**
-
-A: 用 `db_selftest downlink on`，把本机上行编码码流回环到下行解码显示（依赖 `CONFIG_SMART_INTERCOM_AUTO_TEST=y`）。
 
 **Q: 控制通道用的是什么协议？**
 

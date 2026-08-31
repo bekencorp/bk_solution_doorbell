@@ -1,4 +1,4 @@
-set(incs include . auto_test)
+set(incs include .)
 set(srcs)
 
 if (CONFIG_SMART_INTERCOM)
@@ -32,12 +32,6 @@ endif()
 if (CONFIG_INTEGRATION_DOORBELL AND CONFIG_NTWK_CLIENT_SERVICE_ENABLE)
 	list(APPEND srcs
 		src/doorbell_keepalive.c
-	)
-endif()
-
-if (CONFIG_INTEGRATION_DOORBELL AND CONFIG_SMART_INTERCOM_AUTO_TEST)
-	list(APPEND srcs
-		auto_test/doorbell_selftest.c
 	)
 endif()
 

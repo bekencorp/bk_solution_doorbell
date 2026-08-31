@@ -4,6 +4,7 @@
 #include <common/avdk_pixel_types.h>
 #include <components/log.h>
 #include <components/bk_frame_buffer.h>
+#include <components/bk_hardware_ram.h>
 #include <components/bk_gpu_ctlr.h>
 #include <components/bk_gpu.h>
 #include <components/bk_isp_camera.h>
@@ -17,6 +18,7 @@
 #include "doorbell_devices.h"
 #include "doorbell_isp_sp.h"
 #include "doorbell_display_compositor.h"
+#include "doorbell_downlink_video.h"
 
 #define TAG "db-comp"
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
@@ -55,8 +57,15 @@
  * SP frame) onto a spare out_pool buffer and flushes it. Kept above a healthy
  * downlink frame interval so that, when downlink is fast enough, the normal
  * in-pipeline PIP blit path (gpu_flex_data_frame_done) handles it and this
- * supplemental refresh stays dormant. */
-#define COMP_PIP_IDLE_MS         50U
+ * supplemental refresh stays dormant.
+ *
+ * NOTE: the real steady-state downlink interval measured at runtime is ~66ms
+ * (~13-15fps of composited output), so the previous 50ms value sat BELOW the
+ * healthy interval and false-triggered the supplemental refresh 7-19x/5s,
+ * burning a 2MB HPDMA copy + a GPU-lock overlay blit each time and stealing
+ * cycles from the main decode+GPU bond. Raised to 200ms (~3 frame periods) so
+ * it only fires on a genuine freeze. */
+#define COMP_PIP_IDLE_MS         200U
 
 typedef struct
 {
@@ -68,6 +77,10 @@ typedef struct
 {
     bk_gpu_ctlr_handle_t gpu;
     volatile uint8_t running;
+    uint8_t gpu_open_deferred;
+
+    uint16_t main_width;
+    uint16_t main_height;
 
     /* GPU output (ARGB) frame pool -> DPU. */
     comp_pool_entry_t out_pool[COMP_FRAME_POOL_COUNT];
@@ -763,6 +776,15 @@ static void comp_pip_stop(void)
 /* Public API                                                        */
 /* ------------------------------------------------------------------ */
 
+uint32_t doorbell_compositor_gpu_pingpong_bytes(uint16_t dst_w, uint16_t dst_h)
+{
+    uint16_t out_w = (uint16_t)(((uint32_t)dst_w + 15U) & ~15U);
+
+    (void)dst_h;
+    /* compress=true: output_width_x_flexa_lines = output_width * flexa_lines */
+    return (uint32_t)out_w * (uint32_t)COMP_GPU_FLEXA_LINES * 2U + 64U;
+}
+
 bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
                                    uint8_t *flexa_ring,
                                    uint8_t flexa_buf_count)
@@ -831,11 +853,15 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
      * the PIP self-view pool is also live and freezes the whole compositor. */
     pool_buf_size = (uint32_t)bk_pixel_size_get(BK_PIXEL_FORMAT_ARGB8888) *
                     ((uint32_t)dst_w / 4U) * (((uint32_t)dst_h + 15U) & ~15U);
-    ret = comp_out_pool_init(pool_buf_size);
-    if (ret != AVDK_ERR_OK)
+    s_comp.out_pool_size = pool_buf_size;
+    if (!cfg->defer_out_pool)
     {
-        LOGE("out pool init failed=%d size=%u\n", (int)ret, (unsigned)pool_buf_size);
-        goto fail_sem;
+        ret = comp_out_pool_init(pool_buf_size);
+        if (ret != AVDK_ERR_OK)
+        {
+            LOGE("out pool init failed=%d size=%u\n", (int)ret, (unsigned)pool_buf_size);
+            goto fail_sem;
+        }
     }
 
     os_memset(&gpu_cfg, 0, sizeof(gpu_cfg));
@@ -871,15 +897,9 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
         LOGE("gpu init failed=%d\n", (int)ret);
         goto fail_gpu;
     }
-    ret = bk_gpu_open(s_comp.gpu);
-    if (ret != AVDK_ERR_OK)
-    {
-        LOGE("gpu open failed=%d\n", (int)ret);
-        goto fail_gpu;
-    }
 
-    s_comp.running = 1U;
-
+    s_comp.main_width = cfg->main_width;
+    s_comp.main_height = cfg->main_height;
     s_comp.pip_enable = cfg->pip_enable;
     if (cfg->pip_enable)
     {
@@ -888,7 +908,32 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
         s_comp.pip_dst_x = cfg->pip_dst_x;
         s_comp.pip_dst_y = cfg->pip_dst_y;
         s_comp.pip_rotate = cfg->pip_rotate;
+    }
 
+    if (cfg->defer_gpu_open)
+    {
+        s_comp.gpu_open_deferred = 1U;
+        LOGI("compositor gpu init done (defer open): main=%ux%u dst=%ux%u deg=%u pip=%u\n",
+             (unsigned)cfg->main_width, (unsigned)cfg->main_height,
+             (unsigned)dst_w, (unsigned)dst_h, (unsigned)degree,
+             (unsigned)s_comp.pip_enable);
+        return BK_OK;
+    }
+
+    doorbell_downlink_release_pingpong_hold();
+
+    ret = bk_gpu_open(s_comp.gpu);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("gpu open failed=%d hsram_free=%u\n", (int)ret,
+             (unsigned)rtos_get_hsram_free_heap_size());
+        goto fail_gpu;
+    }
+
+    s_comp.running = 1U;
+
+    if (cfg->pip_enable)
+    {
         if (comp_pip_start() != AVDK_ERR_OK)
         {
             LOGW("pip start failed, main picture continues without PIP\n");
@@ -905,7 +950,10 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
 fail_gpu:
     if (s_comp.gpu != NULL)
     {
-        (void)bk_gpu_close(s_comp.gpu);
+        if (s_comp.gpu_open_deferred == 0U)
+        {
+            (void)bk_gpu_close(s_comp.gpu);
+        }
         (void)bk_gpu_deinit(s_comp.gpu);
         (void)bk_gpu_delete(s_comp.gpu);
         s_comp.gpu = NULL;
@@ -918,8 +966,75 @@ fail_sem:
         (void)rtos_deinit_semaphore(&s_comp.display_release_sem);
         s_comp.display_release_sem = NULL;
     }
+    s_comp.gpu_open_deferred = 0U;
     s_comp.running = 0U;
     return BK_FAIL;
+}
+
+bk_err_t doorbell_compositor_gpu_open(void)
+{
+    avdk_err_t ret;
+
+    if (s_comp.gpu == NULL || s_comp.gpu_open_deferred == 0U)
+    {
+        return BK_ERR_STATE;
+    }
+
+    doorbell_downlink_release_pingpong_hold();
+
+    ret = bk_gpu_open(s_comp.gpu);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("gpu open failed=%d hsram_free=%u\n", (int)ret,
+             (unsigned)rtos_get_hsram_free_heap_size());
+        return BK_FAIL;
+    }
+
+    s_comp.gpu_open_deferred = 0U;
+    s_comp.running = 1U;
+
+    if (s_comp.pip_enable)
+    {
+        if (comp_pip_start() != AVDK_ERR_OK)
+        {
+            LOGW("pip start failed, main picture continues without PIP\n");
+            s_comp.pip_enable = false;
+        }
+    }
+
+    LOGI("compositor gpu open done: main=%ux%u pip=%u\n",
+         (unsigned)s_comp.main_width, (unsigned)s_comp.main_height,
+         (unsigned)s_comp.pip_enable);
+    return BK_OK;
+}
+
+bk_err_t doorbell_compositor_out_pool_init(void)
+{
+    avdk_err_t ret;
+
+    if (s_comp.gpu == NULL)
+    {
+        return BK_ERR_STATE;
+    }
+    if (s_comp.out_pool_count != 0U)
+    {
+        return BK_OK;
+    }
+    if (s_comp.out_pool_size == 0U)
+    {
+        return BK_ERR_PARAM;
+    }
+
+    ret = comp_out_pool_init(s_comp.out_pool_size);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("deferred out pool init failed=%d size=%u\n",
+             (int)ret, (unsigned)s_comp.out_pool_size);
+        return BK_FAIL;
+    }
+    LOGI("compositor out pool ready: %u x %u bytes\n",
+         (unsigned)s_comp.out_pool_count, (unsigned)s_comp.out_pool_size);
+    return BK_OK;
 }
 
 bk_err_t doorbell_compositor_pip_enable(const doorbell_compositor_config_t *cfg)
@@ -984,12 +1099,13 @@ bk_err_t doorbell_compositor_pip_disable(void)
 
 void doorbell_compositor_stop(void)
 {
-    if (s_comp.gpu == NULL && s_comp.running == 0U)
+    if (s_comp.gpu == NULL)
     {
         return;
     }
 
     s_comp.running = 0U;
+    s_comp.gpu_open_deferred = 0U;
 
     if (s_comp.pip_enable)
     {

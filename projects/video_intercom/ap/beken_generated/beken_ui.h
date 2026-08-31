@@ -31,8 +31,8 @@ extern "C" {
 #include "lvgl.h"
 
 /* Display configuration */
-#define SCREEN_WIDTH    1080
-#define SCREEN_HEIGHT   1920
+#define SCREEN_WIDTH    720
+#define SCREEN_HEIGHT   1280
 
 typedef struct
 {
@@ -119,17 +119,15 @@ void init_page_settings(bk_lv_ui_t *bk_ui);
 void destroy_page_settings(bk_lv_ui_t *bk_ui);
 
 /* declare image */
-LV_IMAGE_DECLARE(door_cam_1024x1536_RGB565A8_NONE);
+LV_IMAGE_DECLARE(door_cam_683x1024_RGB565A8_NONE);
 
 /* declare fonts */
-LV_FONT_DECLARE(lv_font_montserrat_regular_36);
-LV_FONT_DECLARE(lv_font_montserrat_regular_30);
-LV_FONT_DECLARE(lv_font_montserrat_regular_26);
-LV_FONT_DECLARE(lv_font_montserrat_regular_28);
-LV_FONT_DECLARE(lv_font_montserrat_regular_32);
 LV_FONT_DECLARE(lv_font_montserrat_regular_24);
-LV_FONT_DECLARE(lv_font_montserrat_regular_34);
-LV_FONT_DECLARE(lv_font_montserrat_regular_44);
+LV_FONT_DECLARE(lv_font_montserrat_regular_20);
+LV_FONT_DECLARE(lv_font_montserrat_regular_16);
+LV_FONT_DECLARE(lv_font_montserrat_regular_18);
+LV_FONT_DECLARE(lv_font_montserrat_regular_22);
+LV_FONT_DECLARE(lv_font_montserrat_regular_28);
 
 /**
  * @brief Initialize the Beken UI system

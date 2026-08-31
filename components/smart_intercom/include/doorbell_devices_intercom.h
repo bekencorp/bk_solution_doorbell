@@ -60,6 +60,33 @@ int doorbell_devices_preview_gpu_detach(void);
 int doorbell_devices_preview_gpu_attach(void);
 
 /**
+ * @brief Hold the single-view preview GPU off during a pending intercom bring-up.
+ *
+ * videoIntercom.turnOn opens uplink before downlink; attaching the preview GPU
+ * (ISP MP -> GPU) and then tearing it down for the compositor can leave HSRAM
+ * too fragmented for the compositor's ping-pong buffers (main picture green).
+ * While held, doorbell_camera_turn_on skips gpu_pipeline_attach; the downlink
+ * compositor owns the GPU from the start.
+ *
+ * @param hold  true to defer preview GPU; false to restore default behaviour.
+ */
+void doorbell_devices_preview_gpu_hold(bool hold);
+
+/**
+ * @brief Set the uplink sensor fps requested for the next camera turn-on.
+ *
+ * The App-negotiated uplink fps used to travel inside camera_parameters_t.fps,
+ * but that struct lives in the shared doorbell_common header consumed by
+ * smart_lock and the legacy projects (smart_lock even length-checks
+ * sizeof(camera_parameters_t) against the wire command). Carrying the fps here,
+ * intercom-private, keeps the common struct/ABI untouched. Consumed exactly once
+ * by the next doorbell_camera_turn_on(); 0 means "use the board default".
+ *
+ * @param fps  requested sensor fps, or 0 for the board default.
+ */
+void doorbell_devices_set_uplink_fps(uint16_t fps);
+
+/**
  * @brief Force the uplink H.264 encoder to emit an IDR (keyframe) next frame.
  *
  * Used by the self-test loopback so the downlink decoder, which may arm long

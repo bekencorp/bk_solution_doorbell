@@ -7,6 +7,7 @@
 #include "doorbell_comm.h"
 #include "doorbell_cmd.h"
 #include "doorbell_devices.h"
+#include "doorbell_devices_intercom.h"
 #include "doorbell_audio_device.h"
 #include "doorbell_rpc_internal.h"
 
@@ -95,6 +96,7 @@ static int db_parse_stream(cJSON *stream, camera_parameters_t *out)
         }
         out->width = (uint16_t)w->valueint;
         out->height = (uint16_t)h->valueint;
+        doorbell_devices_set_uplink_fps((uint16_t)fps->valueint);
 
         {
             cJSON *rot = db_json_int(cfg, "rotate");
@@ -126,6 +128,7 @@ static int db_parse_stream(cJSON *stream, camera_parameters_t *out)
         out->id = UVC_DEVICE_ID;
         out->width = (uint16_t)w->valueint;
         out->height = (uint16_t)h->valueint;
+        doorbell_devices_set_uplink_fps((uint16_t)fps->valueint);
         return BK_OK;
     }
 
