@@ -135,9 +135,9 @@ For the detailed flashing process, see [Armino SMP Quick Start](https://docs.bek
 | Project | Main features | Details |
 | --- | --- | --- |
 | [doorbell](../projects/doorbell/) | Video doorbell: camera capture, H.264 network streaming, LCD display, two-way audio intercom, BLE provisioning. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell/index.html) |
-| [doorbell_lp](../projects/doorbell_lp/) | Adds low-power keepalive after the multimedia goes idle on top of doorbell. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell_lp/index.html) |
-| [ipc](../projects/ipc/) | Headless IPC network camera: high-resolution capture and H.264 network streaming. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/ipc/index.html) |
-| [isp_h264_tuning](../projects/isp_h264_tuning/) | PC-side image quality tuning: preview ISP raw frames and H.264 encoded stream over Wi-Fi. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/isp_h264_tuning/index.html) |
+| [doorbell_lp](../projects/doorbell_lp/) | Adds low-power keepalive after multimedia goes idle on top of doorbell. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell_lp/index.html) |
+| [doorbell_lp_QN128B832](../projects/doorbell_lp_QN128B832/) | BK7259QN128B832 (B-package) adaptation of doorbell_lp, with the same class of features. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell_lp_QN128B832/index.html) |
+| [video_intercom](../projects/video_intercom/) | Two-way video intercom: JSON-RPC control channel, LCD main view shows remote downlink video with a local PIP self-view, plus full-duplex audio. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/video_intercom/index.html) |
 
 For the applicable scenarios and differences of each project, see the [example projects](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/index.html) page in the online documentation.
 

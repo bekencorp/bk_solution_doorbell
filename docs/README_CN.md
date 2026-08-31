@@ -132,12 +132,12 @@ projects/doorbell/build/bk7259/doorbell/package/all-app.bin
 
 ## 参考工程
 
-| 工程名                                                          | 主要功能                                        | 详细说明                                                                                                                      |
-| ------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| [../projects/doorbell/](../projects/doorbell/)               | 可视门铃：摄像头采集、H.264 网络图传、LCD 显示、双向音频对讲、BLE 配网。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell/index.html)        |
-| [../projects/doorbell_lp/](../projects/doorbell_lp/)         | 在 doorbell 基础上增加多媒体空闲后的低功耗保活。               | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell_lp/index.html)     |
-| [../projects/ipc/](../projects/ipc/)                         | 无屏 IPC 网络摄像头：高分辨率采集与 H.264 网络图传。            | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/ipc/index.html)             |
-| [../projects/isp_h264_tuning/](../projects/isp_h264_tuning/) | PC 端图像质量联调：Wi-Fi 预览 ISP 原始帧与 H.264 编码码流。    | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/isp_h264_tuning/index.html) |
+| 工程名 | 主要功能 | 详细说明 |
+| --- | --- | --- |
+| [doorbell](../projects/doorbell/) | 可视门铃：摄像头采集、H.264 网络图传、LCD 显示、双向音频对讲、BLE 配网。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell/index.html) |
+| [doorbell_lp](../projects/doorbell_lp/) | 在 doorbell 基础上增加多媒体空闲后的低功耗保活。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell_lp/index.html) |
+| [doorbell_lp_QN128B832](../projects/doorbell_lp_QN128B832/) | doorbell_lp 的 BK7259QN128B832（B 版封装）适配工程，功能与 doorbell_lp 同类。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell_lp_QN128B832/index.html) |
+| [video_intercom](../projects/video_intercom/) | 双向可视对讲：JSON-RPC 控制通道，LCD 主画面显示对端下行视频并叠加本机 PIP 自拍小窗，配合双向音频。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/video_intercom/index.html) |
 
 各工程的适用场景与差异说明，请参阅在线文档的 [示例工程](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/index.html) 页面。
 
