@@ -113,10 +113,14 @@ static const char s_lcd_on_json[] =
 static const char s_lcd_off_json[] =
     "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"doorbell.lcd.turnOff\",\"params\":{}}";
 
-/* width/height must match ISP MP (ap_main.c) = the actual uplink encode size. */
-static const char s_downlink_cfg_json[] =
-    "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"doorbell.imageStream.setReceiveConfig\",\"params\":"
-    "{\"imageFormat\":\"h264\",\"formatConfig\":{\"h264\":{\"width\":1280,\"height\":720,\"fps\":15,\"pFrameCount\":29}}}}";
+/* width/height must match ISP MP (ap_main.c) = the actual uplink encode size.
+ * imageStream.setReceiveConfig is no longer a standalone RPC (the App uses
+ * doorbell.videoIntercom.turnOn to open both links), so the loopback drives the
+ * downlink decode pipeline directly through the downlink API. */
+#define DB_ST_DL_WIDTH        (1280U)
+#define DB_ST_DL_HEIGHT       (720U)
+#define DB_ST_DL_FPS          (15U)
+#define DB_ST_DL_PFRAME_COUNT (29U)
 
 static void db_st_inject(const char *json)
 {
@@ -256,7 +260,13 @@ static void db_st_cmd_downlink(int argc, char **argv)
 
         if (!doorbell_downlink_video_is_running())
         {
-            db_st_inject(s_downlink_cfg_json);
+            doorbell_downlink_h264_config_t dl_cfg = {
+                .width = DB_ST_DL_WIDTH,
+                .height = DB_ST_DL_HEIGHT,
+                .fps = DB_ST_DL_FPS,
+                .p_frame_count = DB_ST_DL_PFRAME_COUNT,
+            };
+            (void)doorbell_downlink_set_h264_receive_config(&dl_cfg);
             if (!doorbell_downlink_video_is_running())
             {
                 LOGE("downlink pipeline failed to start, abort loopback\n");

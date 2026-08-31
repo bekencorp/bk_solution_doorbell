@@ -237,6 +237,33 @@ static cJSON *p_camera_turn_on(void)
     return p;
 }
 
+/* doorbell.videoIntercom.turnOn : one-shot two-way intercom. Its params reuse
+ * the camera.turnOn params (uplink) and the imageStream receive config
+ * (downlink), so build both from the shared templates above. */
+static cJSON *p_video_intercom_turn_on(void)
+{
+    cJSON *p = cJSON_CreateObject();
+    cJSON *uplink;
+    cJSON *downlink;
+
+    if (p == NULL)
+    {
+        return NULL;
+    }
+
+    uplink = p_camera_turn_on();
+    downlink = p_image_set_recv_config();
+    if (uplink != NULL)
+    {
+        cJSON_AddItemToObject(p, "uplink", uplink);
+    }
+    if (downlink != NULL)
+    {
+        cJSON_AddItemToObject(p, "downlink", downlink);
+    }
+    return p;
+}
+
 /* doorbell.solution.getConfig : report device solution config to the app. */
 bk_err_t doorbell_rpc_solution_get_config(cJSON *params, cJSON *id)
 {
@@ -278,8 +305,9 @@ bk_err_t doorbell_rpc_solution_get_config(cJSON *params, cJSON *id)
     cfg_add_p(configs, "doorbell.audio.setAcoustics",          p_audio_set_acoustics());
     cfg_add  (configs, "doorbell.misc.ping");
     cfg_add  (configs, "doorbell.notify.heartbeat");
-    cfg_add_p(configs, "doorbell.imageStream.setReceiveConfig", p_image_set_recv_config());
     cfg_add_p(configs, "doorbell.camera.turnOn",               p_camera_turn_on());
+    cfg_add_p(configs, "doorbell.videoIntercom.turnOn",        p_video_intercom_turn_on());
+    cfg_add  (configs, "doorbell.videoIntercom.turnOff");
 
     cJSON_AddStringToObject(solution, "name", "doorbell");
     cJSON_AddItemToObject(solution, "configs", configs);

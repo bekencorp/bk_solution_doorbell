@@ -132,46 +132,66 @@ static int db_parse_stream(cJSON *stream, camera_parameters_t *out)
     return BK_FAIL;
 }
 
-/* doorbell.camera.turnOn : open video capture + uplink transfer. */
-bk_err_t doorbell_rpc_camera_turn_on(cJSON *params, cJSON *id)
+/* Validate a camera.turnOn-style params object ("streamCount" + "streams"[])
+ * and decode the first (main) stream into @out. On failure fills *err_code /
+ * *err_msg for the RPC reply and returns BK_FAIL. */
+static bk_err_t db_camera_parse_first_stream(cJSON *params, camera_parameters_t *out,
+                                             int *err_code, const char **err_msg)
 {
     cJSON *streams = params ? cJSON_GetObjectItem(params, "streams") : NULL;
     cJSON *stream_count = params ? cJSON_GetObjectItem(params, "streamCount") : NULL;
-    camera_parameters_t parameters;
     int n;
-    int cam_ret;
-    int trans_ret;
-    int ret;
+
+    *err_code = DB_RPC_ERR_PARAMS;
 
     if (streams == NULL || !cJSON_IsArray(streams))
     {
-        return doorbell_rpc_send_error(id, DB_RPC_ERR_PARAMS, "Invalid streams", NULL);
+        *err_msg = "Invalid streams";
+        return BK_FAIL;
     }
 
     n = cJSON_GetArraySize(streams);
     if (n <= 0)
     {
-        return doorbell_rpc_send_error(id, DB_RPC_ERR_PARAMS, "Empty streams", NULL);
+        *err_msg = "Empty streams";
+        return BK_FAIL;
     }
 
     if (stream_count != NULL && cJSON_IsNumber(stream_count) && stream_count->valueint != n)
     {
-        return doorbell_rpc_send_error(id, DB_RPC_ERR_PARAMS, "streamCount mismatch", NULL);
+        *err_msg = "streamCount mismatch";
+        return BK_FAIL;
     }
 
     if (n > DB_CAMERA_MAX_STREAMS)
     {
-        cJSON *data = cJSON_CreateObject();
-        if (data != NULL)
-        {
-            cJSON_AddNumberToObject(data, "maxStreams", DB_CAMERA_MAX_STREAMS);
-        }
-        return doorbell_rpc_send_error(id, DB_RPC_ERR_NOT_SUPPORT, "too many streams", data);
+        *err_code = DB_RPC_ERR_NOT_SUPPORT;
+        *err_msg = "too many streams";
+        return BK_FAIL;
     }
 
-    if (db_parse_stream(cJSON_GetArrayItem(streams, 0), &parameters) != BK_OK)
+    if (db_parse_stream(cJSON_GetArrayItem(streams, 0), out) != BK_OK)
     {
-        return doorbell_rpc_send_error(id, DB_RPC_ERR_PARAMS, "Invalid stream config", NULL);
+        *err_msg = "Invalid stream config";
+        return BK_FAIL;
+    }
+
+    return BK_OK;
+}
+
+/* Open the uplink (video capture + H.264 encode + video transfer) from a
+ * camera.turnOn-style params object, with rollback on failure. Shared by
+ * doorbell.camera.turnOn and doorbell.videoIntercom.turnOn. */
+bk_err_t doorbell_rpc_camera_uplink_open_from_params(cJSON *params, int *err_code, const char **err_msg)
+{
+    camera_parameters_t parameters;
+    int cam_ret;
+    int trans_ret;
+    int ret;
+
+    if (db_camera_parse_first_stream(params, &parameters, err_code, err_msg) != BK_OK)
+    {
+        return BK_FAIL;
     }
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
@@ -211,21 +231,17 @@ bk_err_t doorbell_rpc_camera_turn_on(cJSON *params, cJSON *id)
 
     if (ret != BK_OK)
     {
-        return doorbell_rpc_send_error(id, DB_RPC_ERR_INTERNAL, "camera turn on failed", NULL);
+        *err_code = DB_RPC_ERR_INTERNAL;
+        *err_msg = "camera turn on failed";
+        return BK_FAIL;
     }
-    return doorbell_rpc_send_result_null(id);
+    return BK_OK;
 }
 
-/* doorbell.camera.turnOff : params.target must be "all". */
-bk_err_t doorbell_rpc_camera_turn_off(cJSON *params, cJSON *id)
+/* Close the uplink (video transfer + capture) and drop the camera vote. */
+bk_err_t doorbell_rpc_camera_uplink_close(void)
 {
-    cJSON *target = params ? cJSON_GetObjectItem(params, "target") : NULL;
     int ret;
-
-    if (target == NULL || !cJSON_IsString(target) || os_strcmp(target->valuestring, "all") != 0)
-    {
-        return doorbell_rpc_send_error(id, DB_RPC_ERR_PARAMS, "target must be \"all\"", NULL);
-    }
 
     doorbell_video_transfer_turn_off();
     ret = doorbell_camera_turn_off();
@@ -241,10 +257,56 @@ bk_err_t doorbell_rpc_camera_turn_off(cJSON *params, cJSON *id)
     }
 #endif
 
-    if (ret != BK_OK)
+    return (ret == BK_OK) ? BK_OK : BK_FAIL;
+}
+
+/* doorbell.camera.turnOn : open single-direction image transfer (local MIPI
+ * capture -> uplink to App + local MIPI preview). Rejected while the two-way
+ * video intercom is active (that mode owns both links; see
+ * doorbell.videoIntercom.turnOn/turnOff). */
+bk_err_t doorbell_rpc_camera_turn_on(cJSON *params, cJSON *id)
+{
+    int err_code = DB_RPC_ERR_INTERNAL;
+    const char *err_msg = "camera turn on failed";
+
+    if (doorbell_rpc_work_mode_get() == DB_WORK_MODE_INTERCOM)
+    {
+        return doorbell_rpc_send_error(id, DB_RPC_ERR_NOT_SUPPORT,
+                                       "video intercom active, use videoIntercom.turnOff", NULL);
+    }
+
+    if (doorbell_rpc_camera_uplink_open_from_params(params, &err_code, &err_msg) != BK_OK)
+    {
+        return doorbell_rpc_send_error(id, err_code, err_msg, NULL);
+    }
+
+    doorbell_rpc_work_mode_set(DB_WORK_MODE_SINGLE);
+    return doorbell_rpc_send_result_null(id);
+}
+
+/* doorbell.camera.turnOff : params.target must be "all". Rejected while the
+ * two-way video intercom is active; use doorbell.videoIntercom.turnOff instead. */
+bk_err_t doorbell_rpc_camera_turn_off(cJSON *params, cJSON *id)
+{
+    cJSON *target = params ? cJSON_GetObjectItem(params, "target") : NULL;
+
+    if (doorbell_rpc_work_mode_get() == DB_WORK_MODE_INTERCOM)
+    {
+        return doorbell_rpc_send_error(id, DB_RPC_ERR_NOT_SUPPORT,
+                                       "video intercom active, use videoIntercom.turnOff", NULL);
+    }
+
+    if (target == NULL || !cJSON_IsString(target) || os_strcmp(target->valuestring, "all") != 0)
+    {
+        return doorbell_rpc_send_error(id, DB_RPC_ERR_PARAMS, "target must be \"all\"", NULL);
+    }
+
+    if (doorbell_rpc_camera_uplink_close() != BK_OK)
     {
         return doorbell_rpc_send_error(id, DB_RPC_ERR_INTERNAL, "camera turn off failed", NULL);
     }
+
+    doorbell_rpc_work_mode_set(DB_WORK_MODE_IDLE);
     return doorbell_rpc_send_result_null(id);
 }
 

@@ -30,7 +30,8 @@ static const db_rpc_entry_t s_rpc_table[] =
     { "doorbell.lcd.turnOn",                  doorbell_rpc_lcd_turn_on },
     { "doorbell.lcd.turnOff",                 doorbell_rpc_lcd_turn_off },
     { "doorbell.lcd.getStatus",               doorbell_rpc_lcd_get_status },
-    { "doorbell.imageStream.setReceiveConfig", doorbell_rpc_image_set_receive_config },
+    { "doorbell.videoIntercom.turnOn",        doorbell_rpc_video_intercom_turn_on },
+    { "doorbell.videoIntercom.turnOff",       doorbell_rpc_video_intercom_turn_off },
     { "doorbell.misc.ping",                   doorbell_rpc_misc_ping },
     { "doorbell.solution.getConfig",          doorbell_rpc_solution_get_config },
 };

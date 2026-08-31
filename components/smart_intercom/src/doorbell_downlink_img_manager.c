@@ -98,10 +98,16 @@ bk_err_t doorbell_downlink_img_manager_init(uint32_t slot_count, uint32_t slot_c
         s_mgr.slots[i].size = 0;
         s_mgr.free_idx[i] = (uint8_t)i;
 #if CONFIG_SMART_INTERCOM_DL_ZEROCOPY
-        /* Bind the persistent frame_buffer view onto this slot's coded buffer. */
+        /* Bind the persistent frame_buffer view onto this slot's coded buffer.
+         * The SDK unfragment task (other core) may still hold &fb[idx] cached
+         * from a previous session and reassemble residual packets into it. To
+         * avoid a torn (size>0, frame=stale) view, publish the valid frame
+         * pointer BEFORE making size non-zero (barrier), so the reader never
+         * memcpys into a stale/NULL buffer. */
         s_mgr.fb[i].frame = s_mgr.slots[i].data;
-        s_mgr.fb[i].size = slot_capacity;
         s_mgr.fb[i].length = 0;
+        __sync_synchronize();
+        s_mgr.fb[i].size = slot_capacity;
 #endif
     }
     s_mgr.free_top = slot_count;
@@ -136,6 +142,21 @@ void doorbell_downlink_img_manager_deinit(void)
         return;
     }
     s_mgr.inited = 0;
+
+#if CONFIG_SMART_INTERCOM_DL_ZEROCOPY
+    /* The SDK unfragment task (other core) may still hold &fb[idx] cached in its
+     * cache_buf and keep reassembling residual downlink packets into it. Force
+     * every persistent view to the benign size==0 state and publish it (barrier)
+     * BEFORE we free the underlying buffers / wipe the struct. With size==0 the
+     * reassembly hits the "over cache buf size" guard and returns without ever
+     * memcpy-ing into a freed slot, eliminating the NULL+len write crash. */
+    for (i = 0; i < s_mgr.slot_count; i++)
+    {
+        s_mgr.fb[i].length = 0;
+        s_mgr.fb[i].size = 0;
+    }
+    __sync_synchronize();
+#endif
 
     for (i = 0; i < s_mgr.slot_count; i++)
     {

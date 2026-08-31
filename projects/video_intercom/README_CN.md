@@ -133,7 +133,7 @@ components/smart_intercom
 │   ├── doorbell_rpc_camera.c         # camera.turnOn/turnOff/getStatus
 │   ├── doorbell_rpc_audio.c          # audio.turnOn/turnOff/getStatus/setAcoustics
 │   ├── doorbell_rpc_lcd.c            # lcd.turnOn/turnOff/getStatus
-│   ├── doorbell_rpc_image.c          # imageStream.setReceiveConfig（下行解码）
+│   ├── doorbell_rpc_video_intercom.c # videoIntercom.turnOn/turnOff（双向图传一键开关）
 │   ├── doorbell_rpc_misc.c           # misc.ping
 │   ├── doorbell_rpc_solution.c       # solution.getConfig（能力上报）
 │   ├── doorbell_downlink_img_manager.c # 下行 H.264 解码槽池
@@ -265,7 +265,7 @@ doorbell_bk_net_cntrl_recv()
     ↓
 doorbell_jsonrpc_handle_cmd()  → cJSON_Parse → method 字符串
     ↓
-方法表分发（14 项）→ 对应 doorbell_rpc_*.fn(params, id)
+方法表分发（15 项）→ 对应 doorbell_rpc_*.fn(params, id)
 ```
 
 **方法表**：
@@ -273,10 +273,10 @@ doorbell_jsonrpc_handle_cmd()  → cJSON_Parse → method 字符串
 | 方法                                                          | 说明                       |
 | ------------------------------------------------------------- | -------------------------- |
 | `doorbell.service.setType`                                    | 切换 LAN UDP/TCP 服务      |
-| `doorbell.camera.turnOn` / `turnOff` / `getStatus`            | 上行摄像头开关/状态        |
+| `doorbell.camera.turnOn` / `turnOff` / `getStatus`            | 单向图传（上行采集+本地预览）开关/状态 |
 | `doorbell.audio.turnOn` / `turnOff` / `getStatus` / `setAcoustics` | 双向音频开关/状态/AEC 参数 |
 | `doorbell.lcd.turnOn` / `turnOff` / `getStatus`               | LCD 开关/状态              |
-| `doorbell.imageStream.setReceiveConfig`                       | 启动下行 H.264 解码显示    |
+| `doorbell.videoIntercom.turnOn` / `turnOff`                   | 双向视频对讲一键开关（上行采集传输 + 下行接收显示） |
 | `doorbell.misc.ping`                                          | 存活探测                   |
 | `doorbell.solution.getConfig`                                 | 上报设备能力               |
 

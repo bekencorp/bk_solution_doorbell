@@ -133,7 +133,7 @@ components/smart_intercom
 │   ├── doorbell_rpc_camera.c         # camera.turnOn/turnOff/getStatus
 │   ├── doorbell_rpc_audio.c          # audio.turnOn/turnOff/getStatus/setAcoustics
 │   ├── doorbell_rpc_lcd.c            # lcd.turnOn/turnOff/getStatus
-│   ├── doorbell_rpc_image.c          # imageStream.setReceiveConfig (downlink decode)
+│   ├── doorbell_rpc_video_intercom.c # videoIntercom.turnOn/turnOff (one-shot two-way)
 │   ├── doorbell_rpc_misc.c           # misc.ping
 │   ├── doorbell_rpc_solution.c       # solution.getConfig (capability advertise)
 │   ├── doorbell_downlink_img_manager.c # downlink H.264 decode slot pool
@@ -265,7 +265,7 @@ doorbell_bk_net_cntrl_recv()
     ↓
 doorbell_jsonrpc_handle_cmd()  → cJSON_Parse → method string
     ↓
-method table dispatch (14 entries) → doorbell_rpc_*.fn(params, id)
+method table dispatch (15 entries) → doorbell_rpc_*.fn(params, id)
 ```
 
 **Method table:**
@@ -273,10 +273,10 @@ method table dispatch (14 entries) → doorbell_rpc_*.fn(params, id)
 | Method | Description |
 | --- | --- |
 | `doorbell.service.setType` | switch LAN UDP/TCP service |
-| `doorbell.camera.turnOn` / `turnOff` / `getStatus` | uplink camera on/off/status |
+| `doorbell.camera.turnOn` / `turnOff` / `getStatus` | single-direction image transfer (uplink capture + local preview) on/off/status |
 | `doorbell.audio.turnOn` / `turnOff` / `getStatus` / `setAcoustics` | full-duplex audio on/off/status/AEC params |
 | `doorbell.lcd.turnOn` / `turnOff` / `getStatus` | LCD on/off/status |
-| `doorbell.imageStream.setReceiveConfig` | start downlink H.264 decode/display |
+| `doorbell.videoIntercom.turnOn` / `turnOff` | one-shot two-way video intercom (uplink transfer + downlink receive/display) |
 | `doorbell.misc.ping` | liveness probe |
 | `doorbell.solution.getConfig` | advertise device capabilities |
 

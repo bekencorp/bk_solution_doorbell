@@ -444,6 +444,24 @@ static void dl_decode_task_entry(void *arg)
         {
             skipped++;
             s_dl.st_dec_skip++;
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+            /* Escape the wait-for-IDR deadlock. While skipping non-IDR AUs we
+             * never reach the decode-failure branch that asks for a key frame,
+             * so if the stream carries no near-term IDR (e.g. the channel was
+             * (re)opened mid-GOP during an on/off stress test), keep requesting
+             * one -- rate limited -- until an IDR arrives and decoding resyncs.
+             * Without this the local picture stays frozen forever: the main
+             * layer is decode-driven and the PIP self-view is only enabled after
+             * the first successful decode, so zero decodes == both frozen. */
+            {
+                uint32_t now = rtos_get_time();
+                if ((now - last_keyreq_ms) >= DL_KEYREQ_MIN_INTERVAL_MS)
+                {
+                    (void)doorbell_notify_request_keyframe("frameLoss", "h264");
+                    last_keyreq_ms = now;
+                }
+            }
+#endif
             doorbell_downlink_free_push(frame);
             continue;
         }

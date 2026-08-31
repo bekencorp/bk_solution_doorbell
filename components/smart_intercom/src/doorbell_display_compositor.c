@@ -8,6 +8,7 @@
 #include <components/bk_gpu.h>
 #include <components/bk_isp_camera.h>
 #include <driver/isp_base.h>
+#include <driver/hpdma.h>
 #include "modules/vg_lite_gpu/vg_lite.h"
 
 #include "app_display.h"
@@ -548,9 +549,15 @@ static void comp_pip_idle_refresh(void *sp_frame)
         return; /* no spare buffer this tick; skip (main picture keeps showing) */
     }
 
-    /* Seed bg with the frozen main (carries a stale PIP region); the overlay blit
-     * then overwrites only the PIP rect with the fresh SP frame. */
-    os_memcpy(bg, src, s_comp.out_pool_size);
+    /* Seed bg with the frozen main (carries a stale PIP region) via HPDMA; the
+     * overlay blit then overwrites only the PIP rect with the fresh SP frame.
+     * bk_hpdma_memcpy yields the CPU (semaphore) during the transfer and falls
+     * back to a CPU copy internally if the DMA path fails, so bg is always
+     * valid. */
+    if (bk_hpdma_memcpy(bg, src, s_comp.out_pool_size) != BK_OK)
+    {
+        os_memcpy(bg, src, s_comp.out_pool_size);
+    }
 
     if (comp_pip_blit_overlay(bg, sp_frame) == AVDK_ERR_OK)
     {

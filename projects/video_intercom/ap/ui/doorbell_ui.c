@@ -81,13 +81,36 @@ static volatile bool            s_call_active;      /* Two-way video call in pro
 static bk_display_ctlr_handle_t s_lcd_handle;
 static void                    *s_frame_buffer[CONFIG_LVGL_FRAME_BUFFER_NUM];
 
+/* Frame buffer currently committed to the panel (last one flushed by LVGL). */
+static void * volatile          s_onscreen_frame;
+/* On the LVGL -> video-call handoff we keep the last on-screen LVGL frame buffer
+ * allocated (instead of freeing it) so the slab does not recycle it into the
+ * video pipeline and overwrite it while the DPU is still scanning it out. The
+ * panel therefore stays frozen on the last UI frame (no garbage / 花屏) until the
+ * compositor composes its first decoded frame. Freed once a new frame replaces it
+ * on the panel (see doorbell_ui_flush_cb). */
+static void * volatile          s_pinned_frame;
+
 /* -------------------------------------------------------------------------- */
 /* LVGL bring-up                                                              */
 /* -------------------------------------------------------------------------- */
 
 static void doorbell_ui_flush_cb(void *args, void *frame_buffer, int (*cb)(void *args))
 {
+    s_onscreen_frame = frame_buffer;
     bk_display_flush(args, frame_buffer, cb);
+
+    /* A pinned pre-call UI frame is superseded on the panel by this fresh commit
+     * (rebuilt LVGL after a call). Release it now that the panel no longer needs
+     * it. Video-call frames are pushed straight to app_mipi_lcd_flush and never
+     * reach this LVGL flush_cb, so during a call the pin simply persists until the
+     * UI is rebuilt at call end. */
+    if (s_pinned_frame != NULL && frame_buffer != s_pinned_frame)
+    {
+        void *stale = s_pinned_frame;
+        s_pinned_frame = NULL;
+        bk_frame_buffer_free(stale);
+    }
 }
 
 /* Restore the DPU runtime pixel format to what LVGL needs (per the dpu_video config
@@ -127,6 +150,31 @@ static void doorbell_ui_free_frame_buffers(void)
     }
 }
 
+/* Free every LVGL frame buffer except the one currently on the panel (keep),
+ * whose ownership is transferred to the caller (its slot is nulled, not freed).
+ * Returns true if keep was found and retained. */
+static bool doorbell_ui_free_frame_buffers_except(void *keep)
+{
+    bool kept = false;
+
+    for (int i = 0; i < CONFIG_LVGL_FRAME_BUFFER_NUM; i++)
+    {
+        if (s_frame_buffer[i] == NULL)
+        {
+            continue;
+        }
+        if (keep != NULL && s_frame_buffer[i] == keep)
+        {
+            s_frame_buffer[i] = NULL; /* relinquish; caller now owns it */
+            kept = true;
+            continue;
+        }
+        bk_frame_buffer_free(s_frame_buffer[i]);
+        s_frame_buffer[i] = NULL;
+    }
+    return kept;
+}
+
 /* Fully tear down LVGL, returning all the HSRAM it held to the video-call pipeline.
  *
  * Background: lv_vendor_stop() only ends the rendering task; the ~270KB HSRAM draw
@@ -151,7 +199,25 @@ static void doorbell_ui_teardown_lvgl(void)
     lv_vendor_stop();
     lv_vendor_deinit();
     lv_deinit();
-    doorbell_ui_free_frame_buffers();
+
+    /* Preserve the last UI frame across the handoff: keep the on-screen buffer
+     * pinned (do not free it) so the panel keeps showing it - frozen but clean -
+     * while the video pipeline allocates from the rest of the (16MB/13MB) slab
+     * heaps. Without this the freed buffer is recycled into the downlink slots /
+     * compositor pool and overwritten under the still-scanning DPU -> 花屏 until
+     * the first remote frame is decoded. A stale pin from a prior call (should be
+     * NULL by now) is dropped first to avoid a leak. */
+    if (s_pinned_frame != NULL)
+    {
+        void *stale = s_pinned_frame;
+        s_pinned_frame = NULL;
+        bk_frame_buffer_free(stale);
+    }
+    if (doorbell_ui_free_frame_buffers_except(s_onscreen_frame))
+    {
+        s_pinned_frame = s_onscreen_frame;
+    }
+    s_onscreen_frame = NULL;
 
     memset(&bk_lv_tool_ui, 0, sizeof(bk_lv_tool_ui));
 
@@ -431,14 +497,14 @@ void doorbell_ui_set_call_active(bool active)
         /* Key: the downlink image compositor shares the same vg_lite GPU instance as
          * LVGL, but it is not managed by mm_service (camera/audio/lcd) voting and does
          * not stop automatically when the call ends (doorbell_downlink_video_stop is
-         * only called on setReceiveConfig reconfiguration). If not stopped first, the
+         * only called on videoIntercom reconfiguration/turnOff). If not stopped first, the
          * rebuilt LVGL would share the GPU with the still-running compositor; on the
          * next call teardown, lv_gpu_deinit->vg_lite_close would destroy the GPU the
          * compositor is using, and its GPU task would then MemFault dereferencing a
          * null pointer in set_render_target/memcmp. So stop the downlink before
          * rebuilding LVGL, letting the compositor release the GPU and HSRAM so LVGL
          * owns the GPU exclusively. If the phone keeps streaming, the next
-         * imageStream.setReceiveConfig will bring the downlink back up. */
+         * videoIntercom.turnOn will bring the downlink back up. */
         if (doorbell_downlink_video_is_running())
         {
             doorbell_downlink_video_stop();
