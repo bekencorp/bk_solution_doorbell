@@ -329,6 +329,8 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
                 LOGE("doorbell_camera_turn_on failed\n");
             }
 
+            doorbell_transmission_event_report(cmd.opcode, cam_ret & 0xFF, EVT_FLAGS_COMPLETE);
+
             int trans_ret = BK_OK;
             if (cam_ret == BK_OK)
             {
@@ -340,16 +342,13 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
                 }
             }
 
-            int ret = (cam_ret == BK_OK && trans_ret == BK_OK) ? BK_OK : BK_FAIL;
-
             #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+            int ret = (cam_ret == BK_OK && trans_ret == BK_OK) ? BK_OK : BK_FAIL;
             if (ret != BK_OK && !camera_vote_was_set)
             {
                 doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, false);
             }
             #endif
-
-            doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
         }
         break;
 
