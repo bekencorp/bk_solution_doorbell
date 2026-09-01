@@ -17,8 +17,8 @@ The feature lives in the `components/smart_intercom` component, which is mutuall
 
 CPU split:
 
-- **AP** (M55): runs all multimedia and business logic — ISP/encode/decode, GPU composite, LCD, full-duplex audio, BLE provisioning, the `doorbell_core` state machine, the JSON-RPC control plane, downlink decode and PIP compositor.
-- **CP** (M52): after `bk_init()`, runs `db_ipc_msg_init()` for IPC and `pl_wakeup_host()` to power up AP; provides low-power keepalive (keepalive / db_pack / powerctrl) and does **not** call `bk_start_ap_system()` (same as `doorbell_lp`'s CP).
+- **AP**: runs all multimedia and business logic — ISP/encode/decode, GPU composite, LCD, full-duplex audio, BLE provisioning, the `doorbell_core` state machine, the JSON-RPC control plane, downlink decode and PIP compositor.
+- **CP**: after `bk_init()`, runs `db_ipc_msg_init()` for IPC and `pl_wakeup_host()` to power up AP; provides low-power keepalive (keepalive / db_pack / powerctrl) and does **not** call `bk_start_ap_system()` (same as `doorbell_lp`'s CP).
 
 ## 2 Features
 
@@ -27,7 +27,7 @@ CPU split:
 | Two-way video intercom | uplink local-camera H.264 stream + downlink remote H.264 decode/display + full-duplex audio |
 | JSON-RPC control plane | JSON-RPC 2.0 method-table dispatch for camera/audio/lcd/imageStream/service |
 | Downlink video decode | network H.264 → hardware decode → HSRAM FLEXA ring → GPU scale/rotate → LCD |
-| PIP inset | ISP SP self-view (640×360) overlaid top-right of the downlink main picture |
+| PIP inset | ISP SP self-view (320×180) overlaid top-right of the downlink main picture |
 | Downlink zero-copy | `CONFIG_SMART_INTERCOM_DL_ZEROCOPY`: network fragments reassembled directly into decode slots, saving one copy |
 | Low-power keepalive | reuses the CP keepalive path (AP power-down + TCP heartbeat) to lower idle power |
 
@@ -40,15 +40,15 @@ CPU split:
 | LCD picture | single local preview | downlink main picture + local PIP inset |
 | ISP channels | MP only | MP (uplink encode) + SP (PIP self-view) |
 | Component | `smart_lock` | `smart_intercom` (`depends on !SMART_INTERCOM` forces smart_lock off) |
-| Key defconfig | standard doorbell | `CONFIG_SMART_INTERCOM*`, `CONFIG_NTWK_CTRL_CHAN_JSON`, H.264 QUALITY preset |
+| Key defconfig | standard doorbell | `CONFIG_SMART_INTERCOM*`, `CONFIG_NTWK_CTRL_CHAN_JSON`, downlink resolution option, H.264 BALANCED preset |
 
 ## 3 Quick Start
 
 ### 3.1 Hardware
 
 - BK7259 board
-- MIPI camera (GC2053, 1920×1080@15fps)
-- MIPI LCD (HX8399C, 1080×1920)
+- MIPI camera (GC2053, 1280×720@30fps)
+- MIPI LCD (ER68576B, 720×1280 portrait)
 - Speaker / Mic (full-duplex audio)
 
 ### 3.2 Build
@@ -68,11 +68,13 @@ The options in `ap/config/bk7259_ap/defconfig` that distinguish it from standard
 CONFIG_INTEGRATION_DOORBELL=y
 CONFIG_SMART_INTERCOM=y                 # enable the smart_intercom component
 CONFIG_SMART_INTERCOM_DL_ZEROCOPY=y     # downlink video zero-copy
+CONFIG_SMART_INTERCOM_DL_RES_720P=y     # downlink target resolution 720p
+CONFIG_SMART_INTERCOM_DL_SLOT_COUNT=6   # downlink decode ring slot count
 CONFIG_NTWK_CLIENT_SERVICE_ENABLE=y
 CONFIG_NTWK_CTRL_CHAN_JSON=y            # control channel uses JSON
 CONFIG_NTWK_CTRL_JSON_RX_MAX_SIZE=8192
 CONFIG_CJSON_USE=y
-CONFIG_H264_QP_PRESET_QUALITY=y         # 2 Mbps quality preset
+CONFIG_H264_QP_PRESET_BALANCED=y        # 1.5 Mbps balanced preset (720p uplink forces balanced at runtime)
 ```
 
 ### 3.4 Demo
@@ -134,7 +136,7 @@ components/smart_intercom
 ```mermaid
 flowchart TB
     subgraph DEV["BK7259 device"]
-        subgraph CP["CP (M52) connectivity and keepalive framework"]
+        subgraph CP["CP connectivity and keepalive framework"]
             CP_BOOT["System boot / powerctrl\nAP power on/off"]
             CP_NET["Wi-Fi stack\nnetwork connection / DHCP / TCP/IP"]
             CP_BT["Bluetooth / BLE\nprovisioning / link maintenance"]
@@ -147,7 +149,7 @@ flowchart TB
             CP_KEEP --> CP_IPC
         end
 
-        subgraph AP["AP (M55) multimedia and AI application framework"]
+        subgraph AP["AP multimedia and AI application framework"]
             AP_CTRL["Control plane\nJSON-RPC / camera / audio / lcd / imageStream"]
             AP_CAP["Audio/video capture\nMIPI/UVC camera / Mic"]
             AP_MEDIA["Media processing\nISP / JPEG/H.264 codec / GPU / LCD"]
@@ -178,9 +180,9 @@ Responsibility split:
 ### 5.2 Uplink (local → network)
 
 ```
-MIPI GC2053 1080p@15
+MIPI GC2053 720p@30
     ↓
-ISP MP 256×144 NV12 (flexa channel)
+ISP MP 1280×720 NV12 (flexa channel, 1:1)
     ↓
 H.264 encoder (flexa bond)
     ↓
@@ -191,25 +193,27 @@ ntwk_trans_video_send() → APP/peer
 
 Triggered by JSON-RPC `doorbell.camera.turnOn` (with a stream config).
 
-> **Why 256×144**: this is the seam-free HSRAM-safe sweet spot. 256×144 is exactly 9×16 lines, so a **full-frame** FLEXA ring (`DL_SEG_NUM=9`) is only ~55KB and fits HSRAM alongside the GPU 128KB composite buffer + uplink encode + PIP. Larger sizes (e.g. 512×288) need a ~221KB full-frame ring that does not fit, forcing a shallow ring whose mid-picture wrap de-syncs the h264d→GPU FLEXA bond and raises `VCDEC_DEC_INT_ERROR`. Both dimensions must be multiples of 16.
+> **Resolution & rotation**: uplink is 720p (1280×720); the ISP MP matches the camera 1:1 (no scale) and the GPU rotates 90° onto the 720×1280 portrait panel. Both 1280 and 720 are 16-aligned so the compressed output scans out cleanly. Uplink encode keeps running during downlink display; only the preview GPU is detached to the compositor.
 
 ### 5.3 Downlink (network → local display)
 
 ```
-APP/peer H.264 AU
+APP/peer H.264 AU (720p)
     ↓
 video channel (zero-copy: reassemble directly into slot; else memcpy)
     ↓
 doorbell_downlink_img_manager ready queue
     ↓
-db_h264d decode task → bk_h264_decode_frame → HSRAM FLEXA ring
+db_h264d decode task → bk_h264_decode_frame → HSRAM FLEXA ring (shallow)
     ↓
-h264d→GPU bond → compositor main picture (scale 256×144 → 1080p, rotate 90°)
+h264d→GPU bond → compositor main picture (decoded frame 1:1, rotate 90°)
     ↓
 LCD flush (app_mipi_lcd_flush)
 ```
 
 Triggered by JSON-RPC `doorbell.imageStream.setReceiveConfig` (LCD must be on first). Before entering downlink display, `doorbell_devices_preview_gpu_detach()` releases the single-view preview GPU/HSRAM so the compositor can own the GPU.
+
+> **FLEXA ring depth**: the decode HSRAM (~128KB) is shared with the GPU composite buffer + uplink encode + PIP, so the downlink uses a **shallow** ring: seg=4 for downlink-only 720p; seg=3 for 720p concurrent with uplink (videoIntercom) (can drop to 2 under HSRAM pressure, but seg<3 de-syncs the h264d↔GPU FLEXA bond and raises a `vcdec` decode timeout). A full-frame ring is only used when it fits within the ~128KB budget.
 
 **Audio downlink**: `doorbell_bk_net_audio_recv()` → `doorbell_audio_data_callback()` → speaker playback (G.711/G.722/PCM per turnOn params).
 
@@ -219,8 +223,8 @@ Layers while downlink is active:
 
 | Layer | Source | Size | Placement |
 | --- | --- | --- | --- |
-| Main | decoded remote H.264 | 256×144 → full screen | full screen |
-| PIP inset | ISP SP self-view | 640×360 NV12 | top-right, 32px margin, 90° blit rotation |
+| Main | decoded remote H.264 | 720p → 720×1280 portrait | full screen (1:1, 90° rotation) |
+| PIP inset | ISP SP self-view | 320×180 NV12 | top-right, 32px margin, 90° blit rotation (180×320 on screen) |
 
 Uplink encode keeps running during downlink display; only the preview GPU is detached.
 
@@ -306,17 +310,3 @@ void  doorbell_devices_preview_gpu_detach(void);
 void  doorbell_devices_preview_gpu_attach(void);
 void  doorbell_devices_force_idr(void);
 ```
-
-## 7 FAQ
-
-**Q: Can video_intercom and doorbell be built into the same image?**
-
-A: No. The `smart_intercom` Kconfig makes `smart_lock` satisfy `depends on !SMART_INTERCOM` and be disabled — they are mutually exclusive. With `CONFIG_SMART_INTERCOM=y`, `smart_lock` compiles to an empty library.
-
-**Q: Why is the downlink video size fixed at 256×144? Can it be larger?**
-
-A: It is limited by HSRAM size. 256×144 is the HSRAM-safe size that fits a full-frame FLEXA ring; larger sizes cause ring wrap, h264d→GPU de-sync, and `VCDEC_DEC_INT_ERROR`. Both dimensions must be multiples of 16.
-
-**Q: What protocol does the control channel use?**
-
-A: JSON-RPC 2.0 (`CONFIG_NTWK_CTRL_CHAN_JSON=y`), unlike the binary command channel of standard doorbell.

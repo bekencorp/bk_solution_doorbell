@@ -17,8 +17,8 @@
 
 CPU 分工：
 
-- **AP**（M55）：运行全部多媒体与业务逻辑——ISP/编码/解码、GPU 合成、LCD、双向音频、BLE 配网、`doorbell_core` 状态机、JSON-RPC 控制面、下行解码与 PIP 合成。
-- **CP**（M52）：`bk_init()` 后 `db_ipc_msg_init()` 初始化 IPC，`pl_wakeup_host()` 上电 AP；提供低功耗保活（keepalive / db_pack / powerctrl），**不调用** `bk_start_ap_system()`（与 `doorbell_lp` 的 CP 侧一致）。
+- **AP**：运行全部多媒体与业务逻辑——ISP/编码/解码、GPU 合成、LCD、双向音频、BLE 配网、`doorbell_core` 状态机、JSON-RPC 控制面、下行解码与 PIP 合成。
+- **CP**：`bk_init()` 后 `db_ipc_msg_init()` 初始化 IPC，`pl_wakeup_host()` 上电 AP；提供低功耗保活（keepalive / db_pack / powerctrl），**不调用** `bk_start_ap_system()`（与 `doorbell_lp` 的 CP 侧一致）。
 
 ## 2 功能特性
 
@@ -27,7 +27,7 @@ CPU 分工：
 | 双向可视对讲      | 上行本机摄像头 H.264 图传 + 下行对端 H.264 视频解码显示 + 双向音频          |
 | JSON-RPC 控制面   | JSON-RPC 2.0 方法表调度，控制 camera/audio/lcd/imageStream/service         |
 | 下行视频解码显示  | 网络 H.264 → 硬件解码 → HSRAM FLEXA 环 → GPU 缩放/旋转 → LCD               |
-| PIP 画中画        | ISP SP 自拍画面（640×360）叠加在下行主画面右上角                          |
+| PIP 画中画        | ISP SP 自拍画面（320×180）叠加在下行主画面右上角                          |
 | 下行视频零拷贝    | `CONFIG_SMART_INTERCOM_DL_ZEROCOPY`：网络分片直接重组进解码槽，省去一次拷贝 |
 | 低功耗保活        | 复用 CP 侧 keepalive（AP 掉电 + TCP 心跳），空闲时降功耗                    |
 
@@ -40,15 +40,15 @@ CPU 分工：
 | LCD 画面      | 单路本机预览                    | 下行主画面 + 本机 PIP 小窗                                         |
 | ISP 通道      | 仅 MP                           | MP（上行编码）+ SP（PIP 自拍）                                     |
 | 组件          | `smart_lock`                    | `smart_intercom`（`depends on !SMART_INTERCOM` 使 smart_lock 关闭） |
-| 关键 defconfig | 标准 doorbell                   | `CONFIG_SMART_INTERCOM*`、`CONFIG_NTWK_CTRL_CHAN_JSON`、H.264 QUALITY 预设 |
+| 关键 defconfig | 标准 doorbell                   | `CONFIG_SMART_INTERCOM*`、`CONFIG_NTWK_CTRL_CHAN_JSON`、下行分辨率选项、H.264 BALANCED 预设 |
 
 ## 3 快速开始
 
 ### 3.1 硬件准备
 
 - BK7259 开发板
-- MIPI 摄像头（GC2053，1920×1080@15fps）
-- MIPI LCD（HX8399C，1080×1920）
+- MIPI 摄像头（GC2053，1280×720@30fps）
+- MIPI LCD（ER68576B，720×1280 竖屏）
 - Speaker / Mic（双向音频）
 
 ### 3.2 编译
@@ -68,11 +68,13 @@ SDK_DIR=/abs/path/to/bk_avdk_smp_release_4.0.1 ./dbuild.sh make bk7259 PROJECT=v
 CONFIG_INTEGRATION_DOORBELL=y
 CONFIG_SMART_INTERCOM=y                 # 启用 smart_intercom 组件
 CONFIG_SMART_INTERCOM_DL_ZEROCOPY=y     # 下行视频零拷贝
+CONFIG_SMART_INTERCOM_DL_RES_720P=y     # 下行目标分辨率 720p
+CONFIG_SMART_INTERCOM_DL_SLOT_COUNT=6   # 下行解码环槽数
 CONFIG_NTWK_CLIENT_SERVICE_ENABLE=y
 CONFIG_NTWK_CTRL_CHAN_JSON=y            # 控制通道走 JSON
 CONFIG_NTWK_CTRL_JSON_RX_MAX_SIZE=8192
 CONFIG_CJSON_USE=y
-CONFIG_H264_QP_PRESET_QUALITY=y         # 2Mbps 画质预设
+CONFIG_H264_QP_PRESET_BALANCED=y        # 1.5Mbps 均衡预设（720p 上行运行时固定用均衡）
 ```
 
 ### 3.4 演示流程
@@ -134,7 +136,7 @@ components/smart_intercom
 ```mermaid
 flowchart TB
     subgraph DEV["BK7259 设备端"]
-        subgraph CP["CP（M52）连接与保活框架"]
+        subgraph CP["CP 连接与保活框架"]
             CP_BOOT["系统启动 / powerctrl\nAP 上下电控制"]
             CP_NET["Wi-Fi 协议栈\n网络连接 / DHCP / TCP/IP"]
             CP_BT["Bluetooth / BLE\n配网 / 连接维护"]
@@ -147,7 +149,7 @@ flowchart TB
             CP_KEEP --> CP_IPC
         end
 
-        subgraph AP["AP（M55）多媒体与 AI 业务框架"]
+        subgraph AP["AP 多媒体与 AI 业务框架"]
             AP_CTRL["业务控制面\nJSON-RPC / camera / audio / lcd / imageStream"]
             AP_CAP["音视频采集\nMIPI/UVC 摄像头 / Mic"]
             AP_MEDIA["媒体处理\nISP / JPEG/H.264 编解码 / GPU / LCD"]
@@ -178,9 +180,9 @@ flowchart TB
 ### 5.2 上行通路（本机 → 网络）
 
 ```
-MIPI GC2053 1080p@15
+MIPI GC2053 720p@30
     ↓
-ISP MP 256×144 NV12（flexa 通道）
+ISP MP 1280×720 NV12（flexa 通道，1:1）
     ↓
 H.264 编码器（flexa bond）
     ↓
@@ -191,25 +193,27 @@ ntwk_trans_video_send() → APP/对端
 
 由 JSON-RPC `doorbell.camera.turnOn`（携带 stream 配置）触发。
 
-> **为什么是 256×144**：这是 HSRAM 无缝安全的"甜点"尺寸。256×144 恰为 9×16 行，可用一个约 55KB 的**整帧** FLEXA 环（`DL_SEG_NUM=9`），与 GPU 128KB 合成缓冲 + 上行编码 + PIP 同时放进 HSRAM。更大尺寸（如 512×288）整帧环约 221KB 放不下，被迫用浅环产生画面中段回绕，导致 h264d→GPU FLEXA bond 失步并触发 `VCDEC_DEC_INT_ERROR`。两个维度都必须是 16 的整数倍。
+> **分辨率与旋转**：上行 720p（1280×720），ISP MP 与相机同尺寸（1:1，不缩放），经 GPU 旋转 90° 贴合 720×1280 竖屏面板；1280、720 均为 16 对齐，压缩输出可干净扫描。上行编码在下行显示期间持续运行，仅预览 GPU 被分离给合成器。
 
 ### 5.3 下行通路（网络 → 本机显示）
 
 ```
-APP/对端 H.264 AU
+APP/对端 H.264 AU（720p）
     ↓
 视频通道（零拷贝：直接重组进槽；否则 memcpy）
     ↓
 doorbell_downlink_img_manager 就绪队列
     ↓
-db_h264d 解码任务 → bk_h264_decode_frame → HSRAM FLEXA 环
+db_h264d 解码任务 → bk_h264_decode_frame → HSRAM FLEXA 环（浅环）
     ↓
-h264d→GPU bond → 合成器主画面（256×144 缩放到 1080p，旋转 90°）
+h264d→GPU bond → 合成器主画面（解码帧 1:1 输出，旋转 90°）
     ↓
 LCD 刷新（app_mipi_lcd_flush）
 ```
 
 由 JSON-RPC `doorbell.imageStream.setReceiveConfig` 触发（需先打开 LCD）。进入下行显示前会 `doorbell_devices_preview_gpu_detach()` 释放单路预览 GPU/HSRAM，让合成器独占 GPU。
+
+> **FLEXA 环深度**：解码 HSRAM 约 128KB，需与 GPU 合成缓冲 + 上行编码 + PIP 共享，故下行用**浅环**：仅下行的 720p 用 seg=4；与上行并发（videoIntercom）的 720p 用 seg=3（HSRAM 紧张时可降到 2，但 seg<3 会让 h264d↔GPU FLEXA bond 失步并触发 `vcdec` 解码超时）。整帧环仅在其体积不超过 128KB 预算时才启用。
 
 **音频下行**：`doorbell_bk_net_audio_recv()` → `doorbell_audio_data_callback()` → 扬声器播放（按 turnOn 参数选择 G.711/G.722/PCM）。
 
@@ -217,10 +221,10 @@ LCD 刷新（app_mipi_lcd_flush）
 
 下行显示时的图层：
 
-| 图层     | 来源                | 尺寸               | 位置                        |
-| -------- | ------------------- | ------------------ | --------------------------- |
-| 主画面   | 解码后的对端 H.264  | 256×144 → 全屏    | 铺满全屏                    |
-| PIP 小窗 | ISP SP 自拍         | 640×360 NV12      | 右上角，边距 32px，旋转 90° |
+| 图层     | 来源                | 尺寸                   | 位置                                     |
+| -------- | ------------------- | ---------------------- | ---------------------------------------- |
+| 主画面   | 解码后的对端 H.264  | 720p → 720×1280 竖屏   | 铺满全屏（1:1，旋转 90°）                |
+| PIP 小窗 | ISP SP 自拍         | 320×180 NV12           | 右上角，边距 32px，旋转 90°（屏上占 180×320） |
 
 上行编码在下行显示期间继续运行，仅预览 GPU 被分离。
 
@@ -306,17 +310,3 @@ void  doorbell_devices_preview_gpu_detach(void);
 void  doorbell_devices_preview_gpu_attach(void);
 void  doorbell_devices_force_idr(void);
 ```
-
-## 7 常见问题
-
-**Q: video_intercom 和 doorbell 能同时编到一个固件吗？**
-
-A: 不能。`smart_intercom` 的 Kconfig 使 `smart_lock` 满足 `depends on !SMART_INTERCOM` 而被关闭，二者互斥。启用 `CONFIG_SMART_INTERCOM=y` 时 `smart_lock` 编译为空库。
-
-**Q: 下行视频尺寸为什么固定 256×144？能放大吗？**
-
-A: 受 HSRAM 大小限制。256×144 是能放下整帧 FLEXA 环的 HSRAM 安全尺寸；放大会导致环回绕、h264d→GPU 失步、解码报 `VCDEC_DEC_INT_ERROR`。两维都须为 16 的倍数。
-
-**Q: 控制通道用的是什么协议？**
-
-A: JSON-RPC 2.0（`CONFIG_NTWK_CTRL_CHAN_JSON=y`），区别于标准 doorbell 的二进制命令通道。
