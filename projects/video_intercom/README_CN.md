@@ -50,6 +50,7 @@ CPU 分工：
 - MIPI 摄像头（GC2053，1280×720@30fps）
 - MIPI LCD（ER68576B，720×1280 竖屏）
 - Speaker / Mic（双向音频）
+- microSD 卡（FAT32；存放开机动画/图片资源，详见 [3.5](#35-开机动画与图片资源apresources)）
 
 ### 3.2 编译
 
@@ -84,13 +85,29 @@ CONFIG_H264_QP_PRESET_BALANCED=y        # 1.5Mbps 均衡预设（720p 上行运�
 3. 设备上行本机摄像头画面，同时解码并显示对端下行视频，本机自拍以 PIP 小窗叠加在右上角。
 4. 双向音频接通，实现可视对讲。
 
+### 3.5 开机动画与图片资源（`ap/resources`）
+
+工程自带的开机媒体素材放在 `ap/resources/` 目录：
+
+| 文件 | 大小 | 用途 | 生效开关 | 运行时路径 |
+| ---------- | ------- | ------------------------ | ----------------------------------- | -------------- |
+| `boot.mp4` | ~165 KB | **默认开机动画**（带声音） | `CONFIG_BOOT_VIDEO_PLAYER=y`（本工程默认） | `/sd0/boot.mp4` |
+| `boot.jpg` | ~46 KB  | 开机静态图片（备选）       | `CONFIG_BOOT_IMAGE_PLAYER=y`         | `/sd0/boot.jpg` |
+
+要点：
+
+- **默认行为**：`defconfig` 中 `CONFIG_BOOT_VIDEO_PLAYER=y`、`CONFIG_BOOT_IMAGE_PLAYER=n`，即开机播放 `boot.mp4`（音量 80，`BOOT_VIDEO_ROTATE_AUTO` 自动旋转）；播完保持屏幕点亮并交给 LVGL（`BOOT_VIDEO_DISPLAY_KEEP_ON`，无黑屏闪烁）。
+- **二选一**：开机动画与开机图片互斥；两个宏同时打开时优先用图片，两个宏都关则不播放、开机直接进 UI。
+- **尺寸要求**：素材需按面板原生尺寸制作，ER68576B 为 720×1280 竖屏（代码里 `panel_width=720`、`panel_height=1280`）。图片建议直接做成 720×1280；视频用 `AUTO` 旋转贴合竖屏。
+
 ## 4 工程目录
 
 ```
 projects/video_intercom
 ├── ap/
-│   ├── ap_main.c                 # AP 板级配置（MIPI 摄像头/LCD/GPU）+ doorbell 初始化
+│   ├── ap_main.c                 # AP 板级配置（MIPI 摄像头/LCD/GPU）+ doorbell 初始化 + 开机媒体加载
 │   ├── audio_param/              # 音频参数
+│   ├── resources/                # 开机资源：boot.mp4（默认动画）/ boot.jpg（备选图片），需拷到 SD 卡 /sd0（见 3.5）
 │   └── config/bk7259_ap/defconfig
 ├── cp/
 │   ├── cp_main.c                 # CP：IPC 初始化 + pl_wakeup_host 上电 AP

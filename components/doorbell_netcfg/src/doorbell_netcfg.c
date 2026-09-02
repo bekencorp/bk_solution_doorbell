@@ -63,6 +63,9 @@
 #endif
 
 #include "doorbell_netcfg.h"
+#if CONFIG_BK_BLE_PROVISIONING
+#include "doorbell_ble_adv.h"
+#endif
 
 #define TAG "db-netcfg"
 
@@ -87,6 +90,13 @@ static uint16_t s_wifi_channel;
 static uint8_t s_adv_fw_major;
 static uint8_t s_adv_fw_minor;
 static uint8_t s_adv_fw_patch;
+
+#if CONFIG_BK_BLE_PROVISIONING
+/* Local Name advertised during provisioning ("BK_INTERCOM_<MAC3>"). Cached here
+ * so the project-local compliant advertiser (doorbell_ble_adv) can reuse the
+ * exact same name when it re-drives actv 0. */
+static char s_adv_name[32];
+#endif
 
 /* Application UI event callback (optional). Decouples this component from any UI
  * implementation: the video_intercom UI controller registers here to drive the
@@ -447,6 +457,15 @@ static void dbnp_status_cb(bk_network_provisioning_status_t status, void *user_d
 	{
 		case BK_NETWORK_PROVISIONING_STATUS_RUNNING:
 			LOGI("network provisioning running\r\n");
+#if CONFIG_BK_BLE_PROVISIONING
+			/* The SDK's legacy ble_boarding adv (CONFIG_BT off) omits the 5-byte
+			 * core header, so re-drive actv 0 with a spec-compliant ADV + Scan
+			 * Response carrying {proto_ver, device_type=INTERCOM, fw x3}. This is
+			 * project-local (video_intercom only) and does not touch the SDK. */
+			doorbell_ble_adv_schedule(BK_BLE_PROV_DEV_TYPE_INTERCOM,
+			                          s_adv_fw_major, s_adv_fw_minor, s_adv_fw_patch,
+			                          s_adv_name);
+#endif
 			/* No saved creds -> the SDK entered provisioning mode. Ask the UI
 			 * layer to show the provisioning page (after boot media). */
 			dbnp_ui_notify(DBNP_UI_PROVISIONING);
@@ -635,6 +654,7 @@ int doorbell_boarding_init(void)
 		         bk_ble_provisioning_dev_type_tag(BK_BLE_PROV_DEV_TYPE_INTERCOM),
 		         mac[0], mac[1], mac[2]);
 		bk_ble_provisioning_set_adv_name(adv_name);
+		os_strncpy(s_adv_name, adv_name, sizeof(s_adv_name) - 1);
 
 		bk_ble_provisioning_set_dev_info(BK_BLE_PROV_DEV_TYPE_INTERCOM,
 		                                 s_adv_fw_major, s_adv_fw_minor, s_adv_fw_patch);

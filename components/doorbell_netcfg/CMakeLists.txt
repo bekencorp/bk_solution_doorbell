@@ -4,6 +4,7 @@ set(srcs "")
 if (CONFIG_DOORBELL_NETCFG)
 list(APPEND srcs
 	src/doorbell_netcfg.c
+	src/doorbell_ble_adv.c
 )
 endif()
 

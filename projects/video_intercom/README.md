@@ -50,6 +50,7 @@ CPU split:
 - MIPI camera (GC2053, 1280×720@30fps)
 - MIPI LCD (ER68576B, 720×1280 portrait)
 - Speaker / Mic (full-duplex audio)
+- microSD card (FAT32; holds the boot animation / image assets, see [3.5](#35-boot-animation-and-image-assets-apresources))
 
 ### 3.2 Build
 
@@ -84,13 +85,29 @@ CONFIG_H264_QP_PRESET_BALANCED=y        # 1.5 Mbps balanced preset (720p uplink 
 3. The device uplinks the local camera while decoding and displaying the remote downlink video, with the local self-view as a PIP inset in the top-right corner.
 4. Full-duplex audio connects — a video intercom session.
 
+### 3.5 Boot animation and image assets (`ap/resources`)
+
+The project ships its default boot media under `ap/resources/`:
+
+| File | Size | Purpose | Enable flag | Runtime path |
+| ---------- | ------- | ------------------------------ | ------------------------------------- | -------------- |
+| `boot.mp4` | ~165 KB | **default boot animation** (with audio) | `CONFIG_BOOT_VIDEO_PLAYER=y` (project default) | `/sd0/boot.mp4` |
+| `boot.jpg` | ~46 KB  | static boot image (alternative) | `CONFIG_BOOT_IMAGE_PLAYER=y`          | `/sd0/boot.jpg` |
+
+Notes:
+
+- **Default behavior**: the `defconfig` sets `CONFIG_BOOT_VIDEO_PLAYER=y` and `CONFIG_BOOT_IMAGE_PLAYER=n`, so boot plays `boot.mp4` (volume 80, `BOOT_VIDEO_ROTATE_AUTO`) and keeps the panel lit for LVGL to take over (`BOOT_VIDEO_DISPLAY_KEEP_ON`, no screen-off flicker).
+- **Mutually exclusive**: the animation and the image are mutually exclusive; when both flags are on the image wins, and when both are off nothing plays and the UI comes up immediately.
+- **Size requirement**: author the assets at the panel native size — ER68576B is 720×1280 portrait (`panel_width=720`, `panel_height=1280` in the code). Prefer a 720×1280 image; the video uses `AUTO` rotation to fit the portrait panel.
+
 ## 4 Layout
 
 ```
 projects/video_intercom
 ├── ap/
-│   ├── ap_main.c                 # AP board config (MIPI camera/LCD/GPU) + doorbell init
+│   ├── ap_main.c                 # AP board config (MIPI camera/LCD/GPU) + doorbell init + boot media loading
 │   ├── audio_param/              # audio params
+│   ├── resources/                # boot assets: boot.mp4 (default animation) / boot.jpg (alt image), copy to SD card /sd0 (see 3.5)
 │   └── config/bk7259_ap/defconfig
 ├── cp/
 │   ├── cp_main.c                 # CP: IPC init + pl_wakeup_host powers up AP
