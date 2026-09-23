@@ -514,38 +514,45 @@ static int gpu_pipeline_attach(db_device_info_t *info)
     return BK_OK;
 }
 
+/* Caller must hold info->mm_lock. Claim bond/handle once so concurrent
+ * camera_turn_off + display_turn_off cannot double-close GPU. */
 static int gpu_pipeline_detach(db_device_info_t *info)
 {
+    void *bond;
+    bk_gpu_ctlr_handle_t gpu;
+
     if (info == NULL)
     {
         LOGE("%s, info is NULL\n", __func__);
         return BK_FAIL;
     }
 
-    if (info->gpu_bond != NULL)
+    bond = info->gpu_bond;
+    info->gpu_bond = NULL;
+    if (bond != NULL)
     {
         display_source_t *src = devices_mgmt_get_display_source();
         if (src != NULL && src->id == DISPLAY_STREAM_ID_MIPI_CSI)
         {
-            bk_flexa_isp_gpu_bond_stop(info->gpu_bond);
+            bk_flexa_isp_gpu_bond_stop(bond);
         }
         else
         {
 #ifdef CONFIG_USB_CAMERA
-            bk_flexa_mjpegd_gpu_bond_stop(info->gpu_bond);
+            bk_flexa_mjpegd_gpu_bond_stop(bond);
 #endif
         }
-        info->gpu_bond = NULL;
     }
 
-    if (info->gpu_handle != NULL)
+    gpu = info->gpu_handle;
+    info->gpu_handle = NULL;
+    if (gpu != NULL)
     {
-        avdk_err_t off_ret = app_gpu_turn_off(info->gpu_handle);
+        avdk_err_t off_ret = app_gpu_turn_off(gpu);
         if (off_ret != BK_OK)
         {
             LOGE("%s, app_gpu_turn_off failed, ret = %d\n", __func__, off_ret);
         }
-        info->gpu_handle = NULL;
     }
 
     return BK_OK;
@@ -554,38 +561,57 @@ static int gpu_pipeline_detach(db_device_info_t *info)
 int doorbell_devices_preview_gpu_detach(void)
 {
     db_device_info_t *info = db_device_info;
+    int ret;
 
     if (info == NULL)
     {
         return BK_OK;
     }
+
+    rtos_lock_recursive_mutex(&info->mm_lock);
+
     if (info->gpu_handle == NULL && info->gpu_bond == NULL)
     {
-        return BK_OK;
+        ret = BK_OK;
+        goto out;
     }
     LOGI("%s, releasing single-view preview GPU for downlink compositor\n", __func__);
-    return gpu_pipeline_detach(info);
+    ret = gpu_pipeline_detach(info);
+
+out:
+    rtos_unlock_recursive_mutex(&info->mm_lock);
+    return ret;
 }
 
 int doorbell_devices_preview_gpu_attach(void)
 {
     db_device_info_t *info = db_device_info;
+    int ret;
 
     if (info == NULL)
     {
         return BK_OK;
     }
+
+    rtos_lock_recursive_mutex(&info->mm_lock);
+
     /* Only the single-view preview needs the GPU; requires both capture + LCD. */
     if (!info->video_enable || !info->lcd_enable)
     {
-        return BK_OK;
+        ret = BK_OK;
+        goto out;
     }
     if (info->gpu_handle != NULL)
     {
-        return BK_OK;
+        ret = BK_OK;
+        goto out;
     }
     LOGI("%s, restoring single-view preview GPU\n", __func__);
-    return gpu_pipeline_attach(info);
+    ret = gpu_pipeline_attach(info);
+
+out:
+    rtos_unlock_recursive_mutex(&info->mm_lock);
+    return ret;
 }
 
 int doorbell_camera_turn_on(camera_parameters_t *parameters)
@@ -605,11 +631,13 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
         return ret;
     }
 
+    rtos_lock_recursive_mutex(&info->mm_lock);
+
     if (info->video_enable)
     {
         LOGE("%s, already open %d\n", __func__, __LINE__);
         ret = BK_OK;
-        return ret;
+        goto out;
     }
 
     info->camera_id = parameters->id;
@@ -787,7 +815,8 @@ int doorbell_camera_turn_on(camera_parameters_t *parameters)
 
     info->video_enable = true;
 
-    return BK_OK;
+    ret = BK_OK;
+    goto out;
 
 err:
     doorbell_mipi_board_baseline_restore();
@@ -825,6 +854,9 @@ err:
     }
 
     info->video_enable = false;
+
+out:
+    rtos_unlock_recursive_mutex(&info->mm_lock);
     return ret;
 }
 
@@ -833,19 +865,25 @@ int doorbell_camera_turn_off(void)
     int ret = BK_OK;
 
     db_device_info_t *info = db_device_info;
-    if (info == NULL || info->video_enable == false)
+    if (info == NULL)
     {
         LOGE("%s, already close %d\n", __func__, __LINE__);
         return ret;
     }
 
-    /* Turning the local uplink/camera off: first drop the downlink PIP self-view
-     * so the compositor stops blitting the ISP SP frames (small window would
-     * otherwise freeze on the last SP frame). Must run before the ISP teardown
-     * below so the PIP task is joined while its SP source is still valid. */
-    if (doorbell_downlink_video_is_running())
+    /* Drop PIP before taking mm_lock: pip_disable may join a task that itself
+     * touches preview GPU APIs; avoid lock-order inversion with downlink. */
+    if (info->video_enable && doorbell_downlink_video_is_running())
     {
         (void)doorbell_downlink_pip_disable();
+    }
+
+    rtos_lock_recursive_mutex(&info->mm_lock);
+
+    if (info->video_enable == false)
+    {
+        LOGE("%s, already close %d\n", __func__, __LINE__);
+        goto out;
     }
 
     if (info->camera_id == UVC_DEVICE_ID)
@@ -862,19 +900,19 @@ int doorbell_camera_turn_off(void)
         if (ret != BK_OK)
         {
             LOGE("%s, app_uvc_turn_off failed, ret = %d\n", __func__, ret);
-            return ret;
+            goto out;
         }
         ret = app_h264_encode_close();
         if (ret != BK_OK)
         {
             LOGE("%s, h264_encode_close failed, ret = %d\n", __func__, ret);
-            return ret;
+            goto out;
         }
         ret = app_jpeg_decode_close();
         if (ret != BK_OK)
         {
             LOGE("%s, jpeg_decode_close failed, ret = %d\n", __func__, ret);
-            return ret;
+            goto out;
         }
         info->decode_handle = NULL;
         info->encode_handle = NULL;
@@ -895,7 +933,7 @@ int doorbell_camera_turn_off(void)
         {
             LOGE("%s, app_h264e_turn_off failed, ret = %d\n", __func__, ret);
             ret = BK_FAIL;
-            return ret;
+            goto out;
         }
 
 #ifdef CONFIG_MDS_SNAPSHOT
@@ -910,10 +948,12 @@ int doorbell_camera_turn_off(void)
     {
         LOGE("%s, camera turn off failed, ret = %d\n", __func__, ret);
         ret = BK_FAIL;
-        return ret;
+        goto out;
     }
     info->video_enable = false;
 
+out:
+    rtos_unlock_recursive_mutex(&info->mm_lock);
     return ret;
 }
 
@@ -928,14 +968,18 @@ int doorbell_video_transfer_turn_on(void)
         return ret;
     }
 
+    rtos_lock_recursive_mutex(&info->mm_lock);
+
     if (info->video_enable == false)
     {
         LOGE("%s: video not open!\n", __func__);
-        return ret;
+        goto out;
     }
 
     ret = doorbell_devices_start(info->transfer_format);
 
+out:
+    rtos_unlock_recursive_mutex(&info->mm_lock);
     return ret;
 }
 
@@ -949,14 +993,11 @@ int doorbell_video_transfer_turn_off(void)
         return ret;
     }
 
-    if (info->video_enable == false)
-    {
-        LOGE("%s: video not open!\n", __func__);
-        return ret;
-    }
+    rtos_lock_recursive_mutex(&info->mm_lock);
 
     ret = doorbell_devices_stop();
 
+    rtos_unlock_recursive_mutex(&info->mm_lock);
     return ret;
 }
 
@@ -1084,9 +1125,17 @@ int doorbell_display_turn_on(display_board_config_t *config)
 
     db_device_info_t *info = db_device_info;
 
+    if (info == NULL)
+    {
+        LOGE("%s, info not init\n", __func__);
+        return ret;
+    }
+
+    rtos_lock_recursive_mutex(&info->mm_lock);
+
     if (info->lcd_enable == true)
     {
-        return ret;
+        goto out;
     }
 
 
@@ -1094,7 +1143,7 @@ int doorbell_display_turn_on(display_board_config_t *config)
     if (ret != BK_OK)
     {
         LOGE("%s, app_mipi_lcd_turn_on failed, ret = %d\n", __func__, ret);
-        return ret;
+        goto out;
     }
 
     info->lcd_enable = true;
@@ -1109,7 +1158,8 @@ int doorbell_display_turn_on(display_board_config_t *config)
         }
     }
 
-    return BK_OK;
+    ret = BK_OK;
+    goto out;
 
 error:
     gpu_pipeline_detach(info);
@@ -1119,7 +1169,11 @@ error:
         LOGE("%s, app_mipi_lcd_turn_off failed, ret = %d\n", __func__, ret);
     }
     info->lcd_enable = false;
-    return BK_FAIL;
+    ret = BK_FAIL;
+
+out:
+    rtos_unlock_recursive_mutex(&info->mm_lock);
+    return ret;
 }
 
 int doorbell_display_turn_off(void)
@@ -1127,9 +1181,17 @@ int doorbell_display_turn_off(void)
     int ret = BK_OK;
     db_device_info_t *info = db_device_info;
 
-    if (info->lcd_enable == false)
+    if (info == NULL)
     {
         return EVT_STATUS_ALREADY;
+    }
+
+    rtos_lock_recursive_mutex(&info->mm_lock);
+
+    if (info->lcd_enable == false)
+    {
+        ret = EVT_STATUS_ALREADY;
+        goto out;
     }
 
     gpu_pipeline_detach(info);
@@ -1138,11 +1200,13 @@ int doorbell_display_turn_off(void)
     if (ret != BK_OK)
     {
         LOGE("%s, app_mipi_lcd_turn_off failed, ret = %d\n", __func__, ret);
-        return ret;
+        goto out;
     }
 
     info->lcd_enable = false;
 
+out:
+    rtos_unlock_recursive_mutex(&info->mm_lock);
     return ret;
 }
 
@@ -1160,6 +1224,14 @@ int doorbell_devices_init(void)
     }
 
     os_memset(db_device_info, 0, sizeof(db_device_info_t));
+
+    if (rtos_init_recursive_mutex(&db_device_info->mm_lock) != BK_OK)
+    {
+        LOGE("%s, init mm_lock failed\n", __func__);
+        os_free(db_device_info);
+        db_device_info = NULL;
+        return BK_FAIL;
+    }
 
     return BK_OK;
 }
@@ -1180,6 +1252,7 @@ void doorbell_devices_deinit(void)
             return;
         }
 
+        rtos_deinit_recursive_mutex(&db_device_info->mm_lock);
         os_free(db_device_info);
         db_device_info = NULL;
     }
@@ -1187,6 +1260,8 @@ void doorbell_devices_deinit(void)
 
 bk_err_t doorbell_devices_stop(void)
 {
+    /* Idempotent: safe under mm_lock when called from transfer_turn_off or
+     * devices_start error path (recursive mutex). */
     if (s_db_trans_cfg == NULL)
     {
         return BK_OK;
@@ -1195,7 +1270,7 @@ bk_err_t doorbell_devices_stop(void)
     if (!s_db_trans_cfg->enable)
     {
         LOGE("%s, have been close!\r\n", __func__);
-        return BK_FAIL;
+        return BK_OK;
     }
 
     s_db_trans_cfg->enable = 0;

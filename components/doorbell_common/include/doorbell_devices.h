@@ -9,6 +9,7 @@
 #endif
 
 #include "app_display_types.h"
+#include <os/os.h>
 
 typedef struct
 {
@@ -31,7 +32,6 @@ typedef struct
 {
     uint8_t lcd_enable;
     uint8_t video_enable;
-    uint8_t video_stopping;
     uint8_t audio_enable;
     uint8_t lcd_id;
     uint16_t camera_id; // UVC_DEVICE_ID, MIPI_DEVICE_ID
@@ -44,6 +44,8 @@ typedef struct
     bk_jpeg_decode_ctlr_handle_t decode_handle;
     bk_gpu_ctlr_handle_t gpu_handle;
     void *isp_handle;
+    /* Serializes camera/display/transfer/GPU attach-detach. */
+    beken_mutex_t mm_lock;
 } db_device_info_t;
 
 int doorbell_get_supported_camera_devices(int opcode);
