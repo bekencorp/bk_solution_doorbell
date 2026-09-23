@@ -185,9 +185,10 @@ static cJSON *p_image_set_recv_config(void)
     cJSON_AddNumberToObject(h264, "height", (int)DOORBELL_DL_MAIN_HEIGHT);
     /* Downlink (phone -> device) capture rate negotiated with the App.
      * The consumer ceiling is the GPU compositor: it rotates+compresses each
-     * decoded 1280x720 frame into the 720x1280 panel output (degree=90). The
-     * bonded decode+GPU cost is ~40-41ms/frame -> ~24fps. */
-    cJSON_AddNumberToObject(h264, "fps", 24);
+     * decoded 1280x720 frame into the 720x1280 panel output (degree=90).
+     * Requesting 30fps; verify the real decode+GPU+DPU pipeline sustains it
+     * (previously measured ~40ms/frame -> ~24fps; recheck after optimization). */
+    cJSON_AddNumberToObject(h264, "fps", 30);
     cJSON_AddNumberToObject(h264, "pFrameCount", 29);
     cJSON_AddItemToObject(fc, "h264", h264);
     cJSON_AddItemToObject(p, "formatConfig", fc);

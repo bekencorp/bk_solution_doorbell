@@ -7,6 +7,7 @@
 #include <components/bk_hardware_ram.h>
 #include <components/bk_decode/bk_h264_decode_ctlr.h>
 #include <components/bk_flexa_bond.h>
+#include <driver/aon_rtc.h>
 
 #include "app_gpu.h"
 #include "gpu_core.h"
@@ -28,8 +29,14 @@
 #define DL_SEG_HEIGHT_MB     1U
 /* Shallow FLEXA ring depth for downlink frames whose full-frame ring would
  * exceed the HSRAM budget (~128KB alongside the GPU composite buffer).
- * Matches h264d_gpu_display_example (SEG_NUM=4 at 1280x720). */
-#define DL_SEG_NUM_SHALLOW   4U
+ * seg=3 (not 4): the ring now lives in SRAM5/6 (DL_FLEXA_RING_ON_SRAM=1 +
+ * CONFIG_OS_HEAP_USE_HSRAM), whose heap is only ~134KB, so the seg=4 ring
+ * (~147KB incl. margin) does not fit but the seg=3 ring (~92KB) does. seg 4->3
+ * is proven zero-cost for fps (docs/downlink_h264_flexa_perf.md §12.4: <=0.15fps
+ * / measurement noise) because the 3-seg ring already saturates the GPU
+ * pipeline. seg=3 is the safe minimum (seg=2 stalls the FLEXA H264<->GPU bond
+ * with vcdec timeout 0x401). Do NOT drop below 3. */
+#define DL_SEG_NUM_SHALLOW   3U
 /* 1080p downlink shares the 512KB AP HSRAM heap with the concurrent uplink ISP
  * SP channel (~90KB) + H.264 encoder (task + recon) + transfer task.
  * Measured HSRAM budget for the 1080p ring:
@@ -91,6 +98,44 @@
  * to avoid an IDR-request storm when frames keep being lost. */
 #define DL_KEYREQ_MIN_INTERVAL_MS 300U
 
+/* ============================================================================
+ * PERF TEST ONLY: replay a cached GOP to measure the pure
+ * decode -> FLEXA bond -> GPU rotate/compress -> DPU display throughput,
+ * free of WiFi receive jitter, packet loss and requestKeyFrame churn.
+ *
+ * When DL_TEST_LOOP_GOP is 1, the decode task caches ONE IDR (I) + ONE P access
+ * unit off the live wifi stream, then STOPS consuming wifi and replays a
+ * synthetic GOP forever: decode the I once, then the P DL_TEST_LOOP_GOP_PCOUNT
+ * times, repeat. This reproduces the real 1:29 I:P mix (pFrameCount=29) so the
+ * averaged "cost: h264d+gpu_wait ... ~N.Nfps" line from dl_stats_dump() matches
+ * a live stream, AND the picture keeps changing (the looped P accumulates motion
+ * for 29 frames, then the I snaps it back) instead of freezing on one frame.
+ * Every replayed frame still runs the full decode->GPU->DPU chain.
+ *
+ * MUST be 0 for normal operation (any real video call needs live wifi frames).
+ * ==========================================================================*/
+/* SHIPPING: 0. The harness is kept in the tree (not deleted) so the downlink
+ * ceiling can be re-measured after any SDK sync or pipeline change - set to 1,
+ * rebuild, and read the "cost: h264d+gpu_wait ... ~N.Nfps" / "cost(GOP)" lines.
+ * Last measurement (docs/downlink_h264_flexa_perf.md §13): 44.2fps ceiling with
+ * the panel at 50Hz (I 19.4ms / P 22.8ms). */
+#ifndef DL_TEST_LOOP_GOP
+#define DL_TEST_LOOP_GOP  0
+#endif
+
+/* P-frame repeat count between two I frames (matches pFrameCount=29). */
+#ifndef DL_TEST_LOOP_GOP_PCOUNT
+#define DL_TEST_LOOP_GOP_PCOUNT  29U
+#endif
+
+/* DISCRIMINANT: force the PSRAM0 decoder recon write-through cover OFF via
+ * BK_H264_DECODE_IOCTL_SET_RECON_COVER=0 right after decoder open, to measure
+ * whether the recon cover is actually contributing to downlink fps. Set 0 for
+ * normal operation (cover follows the SDK default recon_cover_enabled=1U). */
+#ifndef DL_TEST_DISABLE_RECON_COVER
+#define DL_TEST_DISABLE_RECON_COVER  0
+#endif
+
 #define DL_TASK_PRIORITY     3U
 #define DL_TASK_STACK        (1024U * 16U)
 
@@ -146,6 +191,20 @@ typedef struct
     uint8_t pip_deferred;  /* uplink+720p: PIP held until first decode succeeds */
     volatile uint8_t ref_break_pending; /* set on slot-starvation drop */
 
+#if DL_TEST_LOOP_GOP
+    /* PERF TEST: cached IDR + P access units replayed forever (their coded slots
+     * are held, not returned to the ready ring). test_loop_pos walks the
+     * synthetic GOP: 0 -> I, 1..PCOUNT -> P, then wraps. */
+    downlink_frame_t *test_loop_iframe;
+    downlink_frame_t *test_loop_pframe;
+    volatile uint8_t  test_loop_active;
+    uint32_t          test_loop_pos;
+
+    /* Split decode-cost stats for the replayed I vs P frame (per stats window). */
+    uint32_t st_i_cost_sum_us, st_i_cost_min_us, st_i_cost_max_us, st_i_n;
+    uint32_t st_p_cost_sum_us, st_p_cost_min_us, st_p_cost_max_us, st_p_n;
+#endif
+
     /* Runtime statistics. Counters are free-running cumulative and are bumped
      * from the network producer (wifi_*) and the decode task (dec_*); the 1s
      * stats timer prints per-window deltas against the *_cached snapshots. Simple
@@ -163,6 +222,16 @@ typedef struct
     uint32_t st_dec_ok_c;
     uint32_t st_dec_fail_c;
     uint32_t st_dec_skip_c;
+
+    /* Bonded H.264 decode_frame wall time (HW decode + wait GPU flexa drain). */
+    uint64_t st_dec_last_us;
+    uint32_t st_dec_cost_sum_us;
+    uint32_t st_dec_cost_min_us;
+    uint32_t st_dec_cost_max_us;
+    uint32_t st_dec_cost_n;
+    uint32_t st_dec_ivl_sum_us;
+    uint32_t st_dec_ivl_min_us;
+    uint32_t st_dec_ivl_max_us;
 } dl_video_ctx_t;
 
 static dl_video_ctx_t s_dl = {0};
@@ -228,9 +297,60 @@ static void dl_stats_dump(void *param)
     s_dl.st_dec_fail_c    = fa;
     s_dl.st_dec_skip_c    = sk;
 
-    LOGI("fps: wifi[%uf %ukbps] h264d[ok %uf fail %u skip %u]\n",
-         (unsigned)wifi_fps, (unsigned)wifi_kbps,
-         (unsigned)dec_fps, (unsigned)dec_fail, (unsigned)dec_skip);
+    {
+        LOGI("fps: wifi[%uf %ukbps] h264d[ok %uf fail %u skip %u]\n",
+             (unsigned)wifi_fps, (unsigned)wifi_kbps,
+             (unsigned)dec_fps, (unsigned)dec_fail, (unsigned)dec_skip);
+#if DL_TEST_LOOP_GOP
+        /* Detailed per-frame decode+GPU cost line: perf-measurement only, printed
+         * solely while the GOP-replay test macro is enabled. */
+        {
+            uint32_t n = s_dl.st_dec_cost_n;
+            uint32_t cost_avg = (n != 0U) ? (s_dl.st_dec_cost_sum_us / n) : 0U;
+            uint32_t ivl_avg = (n != 0U) ? (s_dl.st_dec_ivl_sum_us / n) : 0U;
+            uint32_t cost_min = (n != 0U) ? s_dl.st_dec_cost_min_us : 0U;
+            uint32_t ivl_min = (n != 0U) ? s_dl.st_dec_ivl_min_us : 0U;
+            uint32_t fps_x10 = (ivl_avg != 0U) ? (10000000U / ivl_avg) : 0U;
+
+            LOGI("cost: h264d+gpu_wait n=%u [%u/%u/%u]us ivl[%u/%u/%u]us ~%u.%ufps (min/avg/max)\n",
+                 (unsigned)n,
+                 (unsigned)cost_min, (unsigned)cost_avg, (unsigned)s_dl.st_dec_cost_max_us,
+                 (unsigned)ivl_min, (unsigned)ivl_avg, (unsigned)s_dl.st_dec_ivl_max_us,
+                 (unsigned)(fps_x10 / 10U), (unsigned)(fps_x10 % 10U));
+        }
+#endif
+        s_dl.st_dec_last_us = 0U;
+        s_dl.st_dec_cost_sum_us = 0U;
+        s_dl.st_dec_cost_min_us = 0xFFFFFFFFU;
+        s_dl.st_dec_cost_max_us = 0U;
+        s_dl.st_dec_cost_n = 0U;
+        s_dl.st_dec_ivl_sum_us = 0U;
+        s_dl.st_dec_ivl_min_us = 0xFFFFFFFFU;
+        s_dl.st_dec_ivl_max_us = 0U;
+    }
+#if DL_TEST_LOOP_GOP
+    {
+        uint32_t in = s_dl.st_i_n;
+        uint32_t pn = s_dl.st_p_n;
+        uint32_t iavg = (in != 0U) ? (s_dl.st_i_cost_sum_us / in) : 0U;
+        uint32_t pavg = (pn != 0U) ? (s_dl.st_p_cost_sum_us / pn) : 0U;
+
+        LOGI("cost(GOP): I n=%u [%u/%u/%u]us  P n=%u [%u/%u/%u]us (min/avg/max)\n",
+             (unsigned)in, (unsigned)((in != 0U) ? s_dl.st_i_cost_min_us : 0U),
+             (unsigned)iavg, (unsigned)s_dl.st_i_cost_max_us,
+             (unsigned)pn, (unsigned)((pn != 0U) ? s_dl.st_p_cost_min_us : 0U),
+             (unsigned)pavg, (unsigned)s_dl.st_p_cost_max_us);
+
+        s_dl.st_i_cost_sum_us = 0U;
+        s_dl.st_i_cost_min_us = 0xFFFFFFFFU;
+        s_dl.st_i_cost_max_us = 0U;
+        s_dl.st_i_n = 0U;
+        s_dl.st_p_cost_sum_us = 0U;
+        s_dl.st_p_cost_min_us = 0xFFFFFFFFU;
+        s_dl.st_p_cost_max_us = 0U;
+        s_dl.st_p_n = 0U;
+    }
+#endif
 }
 
 static void dl_stats_start(void)
@@ -250,6 +370,24 @@ static void dl_stats_start(void)
     s_dl.st_dec_ok_c      = 0U;
     s_dl.st_dec_fail_c    = 0U;
     s_dl.st_dec_skip_c    = 0U;
+    s_dl.st_dec_last_us = 0U;
+    s_dl.st_dec_cost_sum_us = 0U;
+    s_dl.st_dec_cost_min_us = 0xFFFFFFFFU;
+    s_dl.st_dec_cost_max_us = 0U;
+    s_dl.st_dec_cost_n = 0U;
+    s_dl.st_dec_ivl_sum_us = 0U;
+    s_dl.st_dec_ivl_min_us = 0xFFFFFFFFU;
+    s_dl.st_dec_ivl_max_us = 0U;
+#if DL_TEST_LOOP_GOP
+    s_dl.st_i_cost_sum_us = 0U;
+    s_dl.st_i_cost_min_us = 0xFFFFFFFFU;
+    s_dl.st_i_cost_max_us = 0U;
+    s_dl.st_i_n = 0U;
+    s_dl.st_p_cost_sum_us = 0U;
+    s_dl.st_p_cost_min_us = 0xFFFFFFFFU;
+    s_dl.st_p_cost_max_us = 0U;
+    s_dl.st_p_n = 0U;
+#endif
 
     if (rtos_init_timer(&s_dl.stats_timer, DL_STATS_DUMP_INTERVAL_MS,
                         dl_stats_dump, NULL) != BK_OK)
@@ -408,6 +546,89 @@ static void dl_hsram_aligned_free(void *ptr)
     os_free(((void **)ptr)[-1]);
 }
 
+/* FLEXA ring in SRAM5/6 (general SRAM os-heap) instead of the HSRAM heap
+ * (SRAM3/4). Rationale: SRAM3/4 is shared by the GPU ping-pong output, VG-Lite
+ * contiguous mem and the DPU per-flush interface, so the decoder-write +
+ * GPU-read of the FLEXA ring contend with GPU/DPU traffic on the SAME bank
+ * every frame. SRAM5/6 is a separate bank on the M55 AXI matrix, so moving the
+ * ring there splits the decode-ring and GPU-output traffic (same idea as the
+ * PSRAM0/PSRAM1 split). A/B confirmed (docs/downlink_h264_flexa_perf.md §12.3):
+ * SRAM5/6 saves ~2ms/frame (~+2fps) vs HSRAM. The general SRAM heap is small
+ * and shared by every os_malloc, so only take the ring from SRAM when a safety
+ * margin still remains; otherwise fall back to the HSRAM heap. os_free()
+ * dispatches by address range, so dl_hsram_aligned_free() releases either heap
+ * correctly. */
+#define DL_FLEXA_RING_ON_SRAM          1
+#define DL_FLEXA_SRAM_KEEP_FREE_BYTES  (24U * 1024U)
+
+#if DL_FLEXA_RING_ON_SRAM
+/* SRAM5/6 aligned malloc (64-byte aligned for GPU/DMA), header holds raw ptr. */
+static void *dl_sram_aligned_malloc(uint32_t alignment, uint32_t size)
+{
+    void *raw;
+    uint32_t total;
+    uintptr_t start;
+    uintptr_t aligned;
+
+    if (alignment < (uint32_t)sizeof(void *))
+    {
+        alignment = (uint32_t)sizeof(void *);
+    }
+    if ((alignment & (alignment - 1U)) != 0U)
+    {
+        return NULL;
+    }
+
+    total = size + alignment - 1U + (uint32_t)sizeof(void *);
+    raw = os_sram_malloc(total);
+    if (raw == NULL)
+    {
+        return NULL;
+    }
+
+    start = (uintptr_t)raw + sizeof(void *);
+    aligned = (start + (alignment - 1U)) & ~((uintptr_t)alignment - 1U);
+    ((void **)aligned)[-1] = raw;
+    return (void *)aligned;
+}
+#endif /* DL_FLEXA_RING_ON_SRAM */
+
+/* Allocate the FLEXA ring: SRAM5/6 first (bank-split), HSRAM (SRAM3/4)
+ * fallback. Freed with dl_hsram_aligned_free() regardless of heap. */
+static uint8_t *dl_flexa_ring_malloc(uint32_t pp_size)
+{
+#if DL_FLEXA_RING_ON_SRAM
+    uint32_t total = pp_size + 64U + (uint32_t)sizeof(void *);
+    size_t sram_free = rtos_get_free_heap_size();
+
+    if (sram_free >= (size_t)total + DL_FLEXA_SRAM_KEEP_FREE_BYTES)
+    {
+        uint8_t *p = (uint8_t *)dl_sram_aligned_malloc(64U, pp_size);
+        if (p != NULL)
+        {
+            LOGI("DL FLEXA ring -> SRAM5/6 pp=%u sram_free %u->%u hsram_free=%u\n",
+                 (unsigned)pp_size, (unsigned)sram_free,
+                 (unsigned)rtos_get_free_heap_size(),
+                 (unsigned)rtos_get_hsram_free_heap_size());
+            return p;
+        }
+        LOGW("DL FLEXA ring: SRAM5/6 alloc failed (free=%u), fall back to HSRAM\n",
+             (unsigned)sram_free);
+    }
+    else
+    {
+        LOGW("DL FLEXA ring: SRAM5/6 low (free=%u need>=%u+%u), fall back to HSRAM\n",
+             (unsigned)sram_free, (unsigned)total,
+             (unsigned)DL_FLEXA_SRAM_KEEP_FREE_BYTES);
+    }
+#else
+    LOGI("DL FLEXA ring -> HSRAM (SRAM5/6 disabled) pp=%u hsram_free=%u\n",
+         (unsigned)pp_size, (unsigned)rtos_get_hsram_free_heap_size());
+#endif /* DL_FLEXA_RING_ON_SRAM */
+
+    return (uint8_t *)dl_hsram_aligned_malloc(64U, pp_size);
+}
+
 static void dl_compositor_dst_size(uint16_t *dst_w, uint16_t *dst_h)
 {
     gpu_board_config_t *board = app_gpu_board_config_get();
@@ -498,7 +719,7 @@ static bk_err_t dl_hsram_alloc_pp_buf(uint16_t width, uint16_t height,
             continue;
         }
 
-        pp = (uint8_t *)dl_hsram_aligned_malloc(64U, pp_size);
+        pp = dl_flexa_ring_malloc(pp_size);
         if (pp == NULL)
         {
             hsram_free(ping);
@@ -545,6 +766,46 @@ static bk_err_t dl_hsram_alloc_pp_buf(uint16_t width, uint16_t height,
     return BK_ERR_NO_MEM;
 }
 
+/* Run one bonded H.264 decode and fold its wall time into the runtime stats
+ * (cost min/avg/max + inter-decode interval, consumed by dl_stats_dump()).
+ * Shared by the normal wifi path and the DL_TEST_LOOP_GOP perf-test path. */
+static avdk_err_t dl_decode_timed(bk_h264_decode_input_t *input, uint32_t *cost_out)
+{
+    uint64_t t0 = bk_aon_rtc_get_us();
+    avdk_err_t ret = bk_h264_decode_frame(s_dl.decoder, input);
+    uint32_t cost_us = (uint32_t)(bk_aon_rtc_get_us() - t0);
+
+    if (cost_out != NULL)
+    {
+        *cost_out = cost_us;
+    }
+    s_dl.st_dec_cost_sum_us += cost_us;
+    if (cost_us < s_dl.st_dec_cost_min_us)
+    {
+        s_dl.st_dec_cost_min_us = cost_us;
+    }
+    if (cost_us > s_dl.st_dec_cost_max_us)
+    {
+        s_dl.st_dec_cost_max_us = cost_us;
+    }
+    if (s_dl.st_dec_last_us != 0U)
+    {
+        uint32_t ivl = (uint32_t)(t0 - s_dl.st_dec_last_us);
+        s_dl.st_dec_ivl_sum_us += ivl;
+        if (ivl < s_dl.st_dec_ivl_min_us)
+        {
+            s_dl.st_dec_ivl_min_us = ivl;
+        }
+        if (ivl > s_dl.st_dec_ivl_max_us)
+        {
+            s_dl.st_dec_ivl_max_us = ivl;
+        }
+    }
+    s_dl.st_dec_last_us = t0;
+    s_dl.st_dec_cost_n++;
+    return ret;
+}
+
 static void dl_decode_task_entry(void *arg)
 {
     uint32_t decoded = 0U;
@@ -578,6 +839,56 @@ static void dl_decode_task_entry(void *arg)
         bk_h264_decode_input_t input = {0};
         avdk_err_t ret;
         uint8_t is_idr = 0U;
+
+#if DL_TEST_LOOP_GOP
+        /* PERF TEST: once armed, ignore wifi entirely and replay the synthetic
+         * GOP (pos 0 -> I, pos 1..PCOUNT -> P, wrap) as fast as the
+         * decode->GPU->DPU chain allows. */
+        if (s_dl.test_loop_active != 0U)
+        {
+            uint8_t is_i = (s_dl.test_loop_pos == 0U);
+            downlink_frame_t *rep = is_i ? s_dl.test_loop_iframe
+                                         : s_dl.test_loop_pframe;
+            uint32_t cost_us = 0U;
+
+            s_dl.test_loop_pos = (s_dl.test_loop_pos >= DL_TEST_LOOP_GOP_PCOUNT)
+                                     ? 0U : (s_dl.test_loop_pos + 1U);
+
+            input.stream = rep->data;
+            input.stream_len = rep->size;
+            input.out_buffer = s_dl.pp_buf;
+            input.out_buffer_size = s_dl.pp_size;
+
+            ret = dl_decode_timed(&input, &cost_us);
+            if (ret == AVDK_ERR_OK)
+            {
+                decoded++;
+                s_dl.st_dec_ok++;
+            }
+            else
+            {
+                s_dl.st_dec_fail++;
+            }
+
+            /* Bin the decode+gpu_wait cost by frame type so I and P costs are
+             * reported separately (GOP replays only these two fixed AUs). */
+            if (is_i != 0U)
+            {
+                s_dl.st_i_cost_sum_us += cost_us;
+                if (cost_us < s_dl.st_i_cost_min_us) s_dl.st_i_cost_min_us = cost_us;
+                if (cost_us > s_dl.st_i_cost_max_us) s_dl.st_i_cost_max_us = cost_us;
+                s_dl.st_i_n++;
+            }
+            else
+            {
+                s_dl.st_p_cost_sum_us += cost_us;
+                if (cost_us < s_dl.st_p_cost_min_us) s_dl.st_p_cost_min_us = cost_us;
+                if (cost_us > s_dl.st_p_cost_max_us) s_dl.st_p_cost_max_us = cost_us;
+                s_dl.st_p_n++;
+            }
+            continue;
+        }
+#endif
 
         frame = doorbell_downlink_ready_pop(DL_POP_TIMEOUT_MS);
         if (frame == NULL)
@@ -656,7 +967,7 @@ static void dl_decode_task_entry(void *arg)
         }
 #endif /* CONFIG_SMART_INTERCOM_DL_WAIT_IDR */
 
-        ret = bk_h264_decode_frame(s_dl.decoder, &input);
+        ret = dl_decode_timed(&input, NULL);
 
         if (ret == AVDK_ERR_OK)
         {
@@ -665,6 +976,48 @@ static void dl_decode_task_entry(void *arg)
 
 #if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
             wait_idr = 0U; /* reference chain valid again */
+#endif
+#if DL_TEST_LOOP_GOP
+            /* Capture one IDR + one P off the live stream to build the synthetic
+             * replay GOP. Hold each captured coded slot (do NOT free it). Arm
+             * once both are cached: from then on wifi is ignored and the top of
+             * the loop replays I + PCOUNT*P forever (pure decode->GPU->DPU). */
+            if (s_dl.test_loop_active == 0U)
+            {
+                uint8_t captured = 0U;
+
+                if (is_idr != 0U && s_dl.test_loop_iframe == NULL)
+                {
+                    s_dl.test_loop_iframe = frame;
+                    captured = 1U;
+                    LOGW("DL TEST: cached I-frame AU=%u bytes\n",
+                         (unsigned)frame->size);
+                }
+                else if (is_idr == 0U && s_dl.test_loop_iframe != NULL &&
+                         s_dl.test_loop_pframe == NULL)
+                {
+                    /* Only take a P once the I is cached, so the P's reference
+                     * chain is anchored to our cached I. */
+                    s_dl.test_loop_pframe = frame;
+                    captured = 1U;
+                    LOGW("DL TEST: cached P-frame AU=%u bytes\n",
+                         (unsigned)frame->size);
+                }
+
+                if (s_dl.test_loop_iframe != NULL && s_dl.test_loop_pframe != NULL)
+                {
+                    s_dl.test_loop_pos = 0U; /* start the GOP at the I */
+                    s_dl.test_loop_active = 1U;
+                    LOGW("DL TEST: GOP ARMED (1 I + %u P looping); wifi input "
+                         "ignored from now (perf test)\n",
+                         (unsigned)DL_TEST_LOOP_GOP_PCOUNT);
+                }
+
+                if (captured != 0U)
+                {
+                    continue; /* hold the slot: skip free_push at loop bottom */
+                }
+            }
 #endif
             if (s_dl.pip_deferred != 0U)
             {
@@ -705,6 +1058,21 @@ static void dl_decode_task_entry(void *arg)
 
         doorbell_downlink_free_push(frame);
     }
+
+#if DL_TEST_LOOP_GOP
+    /* Return the held cached slots so the ready ring is balanced on teardown. */
+    if (s_dl.test_loop_iframe != NULL)
+    {
+        doorbell_downlink_free_push(s_dl.test_loop_iframe);
+        s_dl.test_loop_iframe = NULL;
+    }
+    if (s_dl.test_loop_pframe != NULL)
+    {
+        doorbell_downlink_free_push(s_dl.test_loop_pframe);
+        s_dl.test_loop_pframe = NULL;
+    }
+    s_dl.test_loop_active = 0U;
+#endif
 
     LOGI("decode task exiting, decoded=%u skipped=%u\n",
          (unsigned)decoded, (unsigned)skipped);
@@ -1026,6 +1394,26 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
         dl_decoder_open_probe();
         goto fail_dec;
     }
+
+#if DL_TEST_DISABLE_RECON_COVER
+    {
+        /* DISCRIMINANT (docs/downlink_h264_flexa_perf.md §12.10): force the PSRAM0
+         * decoder recon write-through cover OFF and watch the P-frame cost. If fps
+         * stays ~33.4fps the recon cover is already ineffective in this build; if it
+         * drops, the cover is live. Must run after open() but before the first
+         * decode (recon pool is allocated lazily on frame 1). */
+        uint8_t recon_cover = 0U;
+        if (bk_h264_decode_ioctl(s_dl.decoder, BK_H264_DECODE_IOCTL_SET_RECON_COVER,
+                                 &recon_cover) != AVDK_ERR_OK)
+        {
+            LOGW("DL TEST: disable PSRAM0 recon cover ioctl FAILED\n");
+        }
+        else
+        {
+            LOGW("DL TEST: PSRAM0 recon cover DISABLED (discriminant)\n");
+        }
+    }
+#endif
 
     if (comp_cfg.defer_out_pool)
     {

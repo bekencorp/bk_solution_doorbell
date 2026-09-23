@@ -14,6 +14,11 @@
 #include <components/bk_isp_camera.h>
 #include <driver/isp_base.h>
 #include <driver/hpdma.h>
+#include <driver/aon_rtc.h>
+#if CONFIG_PSRAM_WRITE_THROUGH
+#include <driver/psram.h>
+#include <soc/reg_base.h>
+#endif
 #include "modules/vg_lite_gpu/vg_lite.h"
 
 #include "app_display.h"
@@ -43,6 +48,13 @@
 #define COMP_FRAME_POOL_COUNT    3U
 #define COMP_DISPLAY_PRIME_COUNT 2U
 #define COMP_DISPLAY_WAIT_MS     100U
+
+/* Heap for the main GPU output (compressed-ARGB) frames the DPU scans out.
+ * On PSRAM1 (MEM_SLAB_HEAP_CODED, 0x64000000) for the chip-split bandwidth win.
+ * The PSRAM1 write-through cover is intentionally NOT opened (RCA
+ * docs/psram_write_through_assert.md §13): comp_out_pool_init() does not call
+ * comp_out_pool_cover_enable(). Decoder recon stays on PSRAM0 (UNCODED). */
+#define COMP_OUT_HEAP            MEM_SLAB_HEAP_CODED
 
 #define COMP_PIP_TASK_PRIORITY   5U
 #define COMP_PIP_TASK_STACK      (1024U * 4U)
@@ -95,6 +107,10 @@ typedef struct
     comp_pool_entry_t out_pool[COMP_FRAME_POOL_COUNT];
     uint32_t out_pool_size;
     uint32_t out_pool_count;
+#if CONFIG_PSRAM_WRITE_THROUGH
+    uint8_t out_pool_wt_on;
+    uint8_t out_pool_wt_area;
+#endif
     /* Main display output geometry (mirrors the GPU controller's compressed-ARGB
      * output), needed to describe the DPU-facing dst buffer to VG-Lite for the
      * project-side PIP-only blit. out_disp_w/h are the 16-line-aligned output
@@ -215,8 +231,10 @@ static void *comp_out_alloc(uint32_t size)
     {
         /* Transient safety-net buffer (pool momentarily exhausted): keep it plain
          * cached - do not spend one of the 4 scarce write-through areas on a
-         * short-lived frame. */
-        ptr = bk_frame_buffer_malloc(MEM_SLAB_HEAP_UNCODED, size);
+         * short-lived frame. Still COMP_OUT_HEAP (PSRAM1): a main output frame on
+         * PSRAM0 would share that chip with the decoder recon/reference reads and
+         * cost ~6ms on every P frame (see the chip-split rationale above). */
+        ptr = bk_frame_buffer_malloc(COMP_OUT_HEAP, size);
     }
     return ptr;
 }
@@ -263,6 +281,94 @@ static avdk_err_t comp_out_free(void *ptr)
     return AVDK_ERR_OK;
 }
 
+#if CONFIG_PSRAM_WRITE_THROUGH
+#define COMP_OUT_POOL_WT_ALIGN 64U
+
+static void comp_out_pool_cover_disable(void)
+{
+    if (s_comp.out_pool_wt_on == 0U)
+    {
+        return;
+    }
+
+    (void)bk_psram_disable_write_through((psram_write_through_area_t)s_comp.out_pool_wt_area);
+    (void)bk_psram_free_write_through_channel((psram_write_through_area_t)s_comp.out_pool_wt_area);
+    s_comp.out_pool_wt_on = 0U;
+    s_comp.out_pool_wt_area = 0U;
+}
+
+static void comp_out_pool_cover_enable(uint32_t buf_size) __attribute__((unused));
+static void comp_out_pool_cover_enable(uint32_t buf_size)
+{
+    uint32_t start = 0xFFFFFFFFu;
+    uint32_t end = 0U;
+    uint32_t i;
+    psram_write_through_area_t area;
+
+    comp_out_pool_cover_disable();
+
+    for (i = 0U; i < s_comp.out_pool_count; i++)
+    {
+        uint32_t a;
+        uint32_t b;
+
+        if (s_comp.out_pool[i].buf == NULL || buf_size == 0U)
+        {
+            continue;
+        }
+        a = (uint32_t)(uintptr_t)s_comp.out_pool[i].buf;
+        b = a + buf_size;
+        if (a < start)
+        {
+            start = a;
+        }
+        if (b > end)
+        {
+            end = b;
+        }
+    }
+    if (start >= end)
+    {
+        return;
+    }
+
+    start = (start + (COMP_OUT_POOL_WT_ALIGN - 1U)) & ~(COMP_OUT_POOL_WT_ALIGN - 1U);
+    end &= ~(COMP_OUT_POOL_WT_ALIGN - 1U);
+    if (start >= end)
+    {
+        return;
+    }
+
+    area = bk_psram_alloc_write_through_channel_with_psram_id(
+        (start >= (uint32_t)SOC_PSRAM1_DATA_BASE) ? 1U : 0U);
+    if (area >= PSRAM_WRITE_THROUGH_AREA_COUNT)
+    {
+        LOGE("out pool cover: no write-through channel\n");
+        return;
+    }
+    if (bk_psram_enable_write_through(area, start, end) != BK_OK)
+    {
+        (void)bk_psram_free_write_through_channel(area);
+        LOGE("out pool cover: enable 0x%08x-0x%08x failed\n", start, end);
+        return;
+    }
+    s_comp.out_pool_wt_on = 1U;
+    s_comp.out_pool_wt_area = (uint8_t)area;
+    LOGI("out pool cover: write-through 0x%08x-0x%08x slots=%u area=%u\n",
+         start, end, (unsigned)s_comp.out_pool_count, (unsigned)area);
+}
+#else
+static void comp_out_pool_cover_disable(void)
+{
+}
+
+static void comp_out_pool_cover_enable(uint32_t buf_size) __attribute__((unused));
+static void comp_out_pool_cover_enable(uint32_t buf_size)
+{
+    (void)buf_size;
+}
+#endif
+
 static avdk_err_t comp_out_pool_init(uint32_t buf_size)
 {
     uint32_t i;
@@ -274,7 +380,7 @@ static avdk_err_t comp_out_pool_init(uint32_t buf_size)
 
     for (i = 0; i < COMP_FRAME_POOL_COUNT; i++)
     {
-        s_comp.out_pool[i].buf = bk_frame_buffer_malloc(MEM_SLAB_HEAP_UNCODED, buf_size);
+        s_comp.out_pool[i].buf = bk_frame_buffer_malloc(COMP_OUT_HEAP, buf_size);
         s_comp.out_pool[i].in_use = 0U;
         if (s_comp.out_pool[i].buf == NULL)
         {
@@ -291,12 +397,50 @@ static avdk_err_t comp_out_pool_init(uint32_t buf_size)
     }
     s_comp.out_pool_count = COMP_FRAME_POOL_COUNT;
     s_comp.out_pool_size = buf_size;
+
+    /* Anti-regression guard for the PSRAM chip split. The GPU output pool (which
+     * the DPU scans out) MUST stay on PSRAM1; the decoder recon/reference frames
+     * live on PSRAM0. An SDK/solution sync once silently rewrote the allocation
+     * below to MEM_SLAB_HEAP_UNCODED, putting the pool on PSRAM0 next to the
+     * recon. The COMP_OUT_HEAP macro and its comment survived, so the bug was
+     * invisible in review, and it cost ~2.3ms on every P frame (36fps -> 34fps:
+     * the decoder's 1.38MB reference read then competes with the GPU write and
+     * the DPU scan-out on one chip). Print the chip the pool actually landed on
+     * so one glance at the boot log after any sync catches a repeat. */
+    {
+        uint32_t base = (uint32_t)(uintptr_t)s_comp.out_pool[0].buf;
+        uint8_t chip = (base >= (uint32_t)SOC_PSRAM1_DATA_BASE) ? 1U : 0U;
+
+        if (chip == 1U)
+        {
+            LOGI("out pool: %u x %u @0x%08x -> PSRAM%u (chip-split OK)\n",
+                 (unsigned)COMP_FRAME_POOL_COUNT, (unsigned)buf_size,
+                 (unsigned)base, (unsigned)chip);
+        }
+        else
+        {
+            LOGE("out pool: %u x %u @0x%08x -> PSRAM%u, EXPECTED PSRAM1! "
+                 "chip split broken, downlink loses ~2ms/P-frame\n",
+                 (unsigned)COMP_FRAME_POOL_COUNT, (unsigned)buf_size,
+                 (unsigned)base, (unsigned)chip);
+        }
+    }
+
+    /* PRODUCTION (docs/psram_write_through_assert.md §12.26): the GPU output pool
+     * write-through cover on PSRAM1 is DISABLED. The pool stays on PSRAM1 (CODED)
+     * for the chip-split bandwidth win, but opening a write-through window on the
+     * chip that also holds the RTOS task stacks caused the crashes in this RCA;
+     * 36fps does not depend on the cover. The cover helpers are kept (unused) for
+     * reference only. */
+    /* comp_out_pool_cover_enable(buf_size); */
     return AVDK_ERR_OK;
 }
 
 static void comp_out_pool_deinit(void)
 {
     uint32_t i;
+
+    comp_out_pool_cover_disable();
 
     for (i = 0; i < COMP_FRAME_POOL_COUNT; i++)
     {

@@ -36,9 +36,15 @@ static const db_rpc_entry_t s_rpc_table[] =
     { "doorbell.solution.getConfig",          doorbell_rpc_solution_get_config },
 };
 
+/* EXPERIMENT A reverted (docs/psram_write_through_assert.md §12.25): cJSON is
+ * back on the default allocator (wrapped malloc -> non-cacheable PSRAM1), so it
+ * again acts as the frequently-freed canary on the non-cache PSRAM heap while
+ * the pstress probe hammers the same heap at a lower load. */
 static cJSON *db_rpc_new_msg(void)
 {
-    cJSON *root = cJSON_CreateObject();
+    cJSON *root;
+
+    root = cJSON_CreateObject();
     if (root != NULL)
     {
         cJSON_AddStringToObject(root, "jsonrpc", "2.0");
