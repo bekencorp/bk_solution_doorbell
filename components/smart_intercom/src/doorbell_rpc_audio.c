@@ -109,24 +109,32 @@ bk_err_t doorbell_rpc_audio_turn_on(cJSON *params, cJSON *id)
 #endif
 }
 
-/* doorbell.audio.turnOff */
+/*
+ * doorbell.audio.turnOff - idempotent, like doorbell.videoIntercom.turnOff.
+ *
+ * doorbell_audio_turn_off() has exactly two exits: BK_FAIL when audio_enable is
+ * already false, and BK_OK at the end; the teardown in between cannot fail. So
+ * a non-BK_OK return means precisely "was already off", never a real error, and
+ * the post-condition the App asked for (audio is off) holds either way.
+ *
+ * Reporting that as a JSON-RPC error used to deadlock the session: the App
+ * keeps its "audio on" state on error, so every further tap re-sends turnOff
+ * and never reaches turnOn - the phone stops emitting anything on the control
+ * channel for "turn audio on", and voice stays dead until the call restarts.
+ * Answering success lets the App settle on "off" and recover on the next tap.
+ */
 bk_err_t doorbell_rpc_audio_turn_off(cJSON *params, cJSON *id)
 {
     (void)params;
 #ifdef CONFIG_VOICE_SERVICE
-    int ret = doorbell_audio_turn_off();
+    (void)doorbell_audio_turn_off();
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
-    if (ret == BK_OK)
-    {
-        doorbell_mm_service_vote(MM_STATUS_AUDIO_BIT, false);
-    }
+    /* Unconditional: the vote must track "audio is off", not "we are the ones
+     * who turned it off", or it desyncs from the device state on a repeat. */
+    doorbell_mm_service_vote(MM_STATUS_AUDIO_BIT, false);
 #endif
 
-    if (ret != BK_OK)
-    {
-        return doorbell_rpc_send_error(id, DB_RPC_ERR_INTERNAL, "audio turn off failed", NULL);
-    }
     return doorbell_rpc_send_result_null(id);
 #else
     return doorbell_rpc_send_error(id, DB_RPC_ERR_NOT_SUPPORT, "voice service disabled", NULL);

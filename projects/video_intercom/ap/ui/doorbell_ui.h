@@ -125,6 +125,16 @@ void doorbell_ui_set_call_active(bool active);
 
 bool doorbell_ui_is_ready(void);
 
+/**
+ * @brief Set the door lock state (true = unlocked). Used by the
+ *        incoming-call lock button. Thread-safe for the
+ *        actuator side; UI widgets must be updated on the LVGL thread.
+ */
+void doorbell_ui_door_set(bool unlocked);
+
+/** @brief Current door lock state (true = unlocked). */
+bool doorbell_ui_door_is_unlocked(void);
+
 #ifdef __cplusplus
 }
 #endif

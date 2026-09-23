@@ -47,7 +47,7 @@ typedef struct
  * @brief Configure and (re)start the downlink H.264 receive+decode+display path.
  *
  * Idempotent for an identical config. A different config restarts the pipeline.
- * The DPU/LCD must already be on (doorbell.lcd.turnOn). PIP self-view is enabled
+ * The DPU/LCD is already on (powered up at boot). PIP self-view is enabled
  * automatically when the ISP is running with an SP channel.
  *
  * @param cfg  H.264 receive configuration.

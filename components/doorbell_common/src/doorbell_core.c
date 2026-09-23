@@ -242,6 +242,7 @@ static void doorbell_message_handle(void *param)
                 case DBEVT_BLE_DISABLE:
                 {
 #if CONFIG_BLUETOOTH_AP
+                    doorbell_boarding_ble_disable();
                     bk_bluetooth_deinit();
                     LOGD("close bluetooth finish!\r\n");
 #endif
@@ -285,7 +286,19 @@ static void doorbell_message_handle(void *param)
                      * camera/LCD hardware explicitly. Both are safe no-ops when
                      * already closed (video_enable/lcd_enable == false). */
                     doorbell_camera_turn_off();
+#if !CONFIG_SMART_INTERCOM
+                    /* smart_lock keeps the phone-driven doorbell.lcd.* protocol, so
+                     * the panel really can be left on by an aborted session and has
+                     * to be closed here.
+                     * smart_intercom owns the panel instead: it is claimed once at
+                     * boot (ap_main.c doorbell_display_turn_on) and stays on for the
+                     * whole session. Turning it off here would clear
+                     * db_device_info->lcd_enable with nothing to ever set it again,
+                     * and that flag gates the single-view preview GPU attach in
+                     * doorbell_camera_turn_on() - so every later one-way transfer
+                     * would encode and upload fine but render nothing locally. */
                     doorbell_display_turn_off();
+#endif
 
                     #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
                     /* Abrupt disconnect: phone may not have sent TURN_OFF, clear stale
@@ -302,6 +315,31 @@ static void doorbell_message_handle(void *param)
                         ntwk_sdp_start("doorbell-tcp", NTWK_TRANS_CMD_PORT, NTWK_TRANS_TCP_VIDEO_PORT, NTWK_TRANS_TCP_AUDIO_PORT);
                     }
                     #else
+                    /* Release the transport too, not just the bookkeeping. Clearing
+                     * db_info->service alone lets the next
+                     * DBEVT_LAN_TCP_SERVICE_START_REQUEST past its "already start up"
+                     * guard while ntwk_trans is still initialised, so the re-init
+                     * fails with "context already initialized" and every channel
+                     * registration then reports "context not initialized" - the
+                     * phone never gets a TCP connection and times out.
+                     * DBEVT_LAN_TCP_SERVICE_STOP cannot clean this up either: it
+                     * returns early once service == NONE. This used to be masked by
+                     * the idle keepalive powering the AP down (a cold boot reset the
+                     * context); with the AP kept online the leak persists. */
+                    switch (db_info->service)
+                    {
+                        case DOORBELL_SERVICE_LAN_TCP:
+                            doorbell_bk_network_transfer_deinit("tcp_service");
+                            break;
+                        case DOORBELL_SERVICE_LAN_UDP:
+                            doorbell_bk_network_transfer_deinit("udp_service");
+                            break;
+                        case DOORBELL_SERVICE_P2P_CS2:
+                            doorbell_bk_network_transfer_deinit("cs2_service");
+                            break;
+                        default:
+                            break;
+                    }
                     db_info->service = DOORBELL_SERVICE_NONE;
                     #endif
                     db_info->stopping = BK_FALSE;

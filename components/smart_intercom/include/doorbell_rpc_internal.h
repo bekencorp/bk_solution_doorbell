@@ -90,10 +90,6 @@ bk_err_t doorbell_rpc_audio_turn_off(cJSON *params, cJSON *id);
 bk_err_t doorbell_rpc_audio_get_status(cJSON *params, cJSON *id);
 bk_err_t doorbell_rpc_audio_set_acoustics(cJSON *params, cJSON *id);
 
-bk_err_t doorbell_rpc_lcd_turn_on(cJSON *params, cJSON *id);
-bk_err_t doorbell_rpc_lcd_turn_off(cJSON *params, cJSON *id);
-bk_err_t doorbell_rpc_lcd_get_status(cJSON *params, cJSON *id);
-
 bk_err_t doorbell_rpc_video_intercom_turn_on(cJSON *params, cJSON *id);
 bk_err_t doorbell_rpc_video_intercom_turn_off(cJSON *params, cJSON *id);
 

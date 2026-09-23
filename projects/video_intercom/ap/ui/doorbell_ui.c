@@ -34,9 +34,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <components/log.h>
+#include <components/event.h>
+#include <components/netif.h>
 #include <components/bk_frame_buffer.h>
 #include <components/bk_display.h>
 #include <components/bluetooth/bk_dm_bluetooth.h>
+#include <modules/wifi.h>
 
 #include "lvgl.h"
 #include "lv_vendor.h"
@@ -51,6 +54,7 @@
 #include "doorbell_cmd.h"
 #include "doorbell_downlink_video.h"
 #include "doorbell_ui.h"
+#include "doorbell_ui_i18n.h"
 
 #define TAG "db-ui"
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
@@ -78,6 +82,9 @@
 #define DB_UI_DEVICE_PROTO "BLE 5.2"
 #endif
 
+/* Home 门禁 card is display-only (no tap-to-unlock). Incoming-call lock still
+ * shares s_door_unlocked. */
+
 static volatile bool            s_lvgl_ready;
 static volatile bool            s_boot_done;
 static volatile bool            s_pending_prov;     /* PROVISIONING event that arrived before LVGL was ready */
@@ -89,6 +96,10 @@ static bool                     s_tp_opened;        /* drv_tp_open is not idempo
 
 static bk_display_ctlr_handle_t s_lcd_handle;
 static void                    *s_frame_buffer[CONFIG_LVGL_FRAME_BUFFER_NUM];
+static bool                     s_door_unlocked;    /* persists across LVGL rebuild */
+static volatile bool            s_wifi_connected;   /* STA got IP; persists across LVGL rebuild */
+
+static void doorbell_ui_apply_wifi_icon_locked(void);
 
 /* Frame buffer currently committed to the panel (last one flushed by LVGL). */
 static void * volatile          s_onscreen_frame;
@@ -99,6 +110,10 @@ static void * volatile          s_onscreen_frame;
  * compositor composes its first decoded frame. Freed once a new frame replaces it
  * on the panel (see doorbell_ui_flush_cb). */
 static void * volatile          s_pinned_frame;
+
+static void doorbell_ui_bind_home_locked(void);
+static void doorbell_ui_bind_settings_locked(void);
+static void doorbell_ui_bind_provisioning_locked(void);
 
 /* -------------------------------------------------------------------------- */
 /* LVGL bring-up                                                              */
@@ -336,6 +351,7 @@ static bk_err_t doorbell_ui_start_lvgl(void)
      * start the LVGL task. */
     lv_vendor_disp_lock();
     beken_ui_init();
+    doorbell_ui_bind_home_locked();
     lv_vendor_disp_unlock();
 
     lv_vendor_start();
@@ -379,6 +395,243 @@ static void db_ui_fill_device_info_locked(void)
     db_ui_set_label_locked(bk_lv_tool_ui.provisioning_v_proto, DB_UI_DEVICE_PROTO);
 }
 
+/* Drive the lock actuator. No dedicated lock GPIO is reserved on this EVB
+ * (GPIO_7 is the panel backlight). Log the request; override this function
+ * when the product lock pin is known. */
+void doorbell_ui_door_set(bool unlocked)
+{
+    s_door_unlocked = unlocked;
+    LOGI("door %s\r\n", unlocked ? "unlocked" : "locked");
+}
+
+bool doorbell_ui_door_is_unlocked(void)
+{
+    return s_door_unlocked;
+}
+
+static void db_ui_bind_click(lv_obj_t *obj, lv_event_cb_t cb)
+{
+    if (obj == NULL)
+    {
+        return;
+    }
+    lv_obj_remove_event_cb(obj, cb);
+    lv_obj_add_event_cb(obj, cb, LV_EVENT_CLICKED, NULL);
+}
+
+static void db_ui_pass_clicks(lv_obj_t *obj)
+{
+    if (obj)
+    {
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    }
+}
+
+/* Click handlers run on the LVGL thread: navigate directly, do not take the
+ * vendor disp lock (it is not recursive). */
+static void nav_home_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED)
+    {
+        return;
+    }
+    navigate_to_screen(&bk_lv_tool_ui.home, LV_SCR_LOAD_ANIM_NONE, 0, 0, false,
+                       init_page_home);
+    doorbell_ui_bind_home_locked();
+}
+
+static void nav_settings_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED)
+    {
+        return;
+    }
+    navigate_to_screen(&bk_lv_tool_ui.settings, LV_SCR_LOAD_ANIM_NONE, 0, 0, false,
+                       init_page_settings);
+    doorbell_ui_bind_settings_locked();
+}
+
+static void doorbell_ui_apply_wifi_icon_locked(void)
+{
+    lv_obj_t *off = bk_lv_tool_ui.home_st_wifi;
+    lv_obj_t *on  = bk_lv_tool_ui.home_st_wifi_on;
+    bool connected = s_wifi_connected;
+
+    if (off && lv_obj_is_valid(off))
+    {
+        if (connected)
+        {
+            lv_obj_add_flag(off, LV_OBJ_FLAG_HIDDEN);
+        }
+        else
+        {
+            lv_obj_remove_flag(off, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (on && lv_obj_is_valid(on))
+    {
+        if (connected)
+        {
+            lv_obj_remove_flag(on, LV_OBJ_FLAG_HIDDEN);
+        }
+        else
+        {
+            lv_obj_add_flag(on, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void doorbell_ui_set_wifi_connected(bool connected)
+{
+    s_wifi_connected = connected;
+    if (!s_lvgl_ready)
+    {
+        return;
+    }
+    lv_vendor_disp_lock();
+    doorbell_ui_apply_wifi_icon_locked();
+    lv_vendor_disp_unlock();
+}
+
+static bk_err_t doorbell_ui_wifi_event_cb(void *arg, event_module_t module, int event_id, void *event_data)
+{
+    (void)arg;
+
+    if (module == EVENT_MOD_NETIF && event_id == EVENT_NETIF_GOT_IP4)
+    {
+        netif_event_got_ip4_t *got = (netif_event_got_ip4_t *)event_data;
+
+        if (got == NULL || got->netif_if == NETIF_IF_STA)
+        {
+            doorbell_ui_set_wifi_connected(true);
+        }
+    }
+    else if (module == EVENT_MOD_WIFI && event_id == EVENT_WIFI_STA_DISCONNECTED)
+    {
+        doorbell_ui_set_wifi_connected(false);
+    }
+    return BK_OK;
+}
+
+static void show_provisioning_locked_free(bool start_ble)
+{
+    if (start_ble)
+    {
+        s_wifi_connected = false;
+        doorbell_netcfg_erase();
+    }
+    navigate_to_screen(&bk_lv_tool_ui.provisioning, LV_SCR_LOAD_ANIM_NONE, 0, 0, false,
+                       init_page_provisioning);
+    db_ui_fill_device_info_locked();
+    doorbell_ui_bind_provisioning_locked();
+    if (start_ble)
+    {
+        doorbell_netcfg_start_provisioning();
+    }
+}
+
+static void settings_provision_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED)
+    {
+        return;
+    }
+    show_provisioning_locked_free(true);
+}
+
+/* Must run with the target page already created. */
+static void doorbell_ui_bind_home_locked(void)
+{
+    db_ui_pass_clicks(bk_lv_tool_ui.home_st_settings);
+    db_ui_pass_clicks(bk_lv_tool_ui.home_st_set_lbl);
+    db_ui_bind_click(bk_lv_tool_ui.home_btn_settings, nav_settings_cb);
+
+    db_ui_pass_clicks(bk_lv_tool_ui.home_fc_access);
+    db_ui_pass_clicks(bk_lv_tool_ui.home_img_access);
+    db_ui_pass_clicks(bk_lv_tool_ui.home_lb_access);
+    doorbell_ui_apply_wifi_icon_locked();
+    doorbell_ui_apply_lang();
+}
+
+static void settings_lang_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED)
+    {
+        return;
+    }
+    lv_obj_t *dd = lv_event_get_target_obj(e);
+    uint32_t sel = dd ? lv_dropdown_get_selected(dd) : DB_UI_LANG_ZH;
+    LOGI("ui language -> %s\r\n", sel == DB_UI_LANG_EN ? "en" : "zh");
+    doorbell_ui_set_lang((uint8_t)sel);
+}
+
+static void settings_vol_refresh_locked(void)
+{
+    lv_obj_t *sld = bk_lv_tool_ui.settings_sld_vol;
+    lv_obj_t *lbl = bk_lv_tool_ui.settings_vol_val;
+    char buf[8];
+    int32_t v;
+
+    if (sld == NULL || lbl == NULL || !lv_obj_is_valid(sld) || !lv_obj_is_valid(lbl))
+    {
+        return;
+    }
+    v = lv_slider_get_value(sld);
+    if (v < 0)
+    {
+        v = 0;
+    }
+    if (v > 100)
+    {
+        v = 100;
+    }
+    snprintf(buf, sizeof(buf), "%d%%", (int)v);
+    lv_label_set_text(lbl, buf);
+}
+
+static void settings_vol_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED)
+    {
+        return;
+    }
+    settings_vol_refresh_locked();
+}
+
+static void doorbell_ui_bind_settings_locked(void)
+{
+    db_ui_pass_clicks(bk_lv_tool_ui.settings_ic_back);
+    db_ui_pass_clicks(bk_lv_tool_ui.settings_ic_gohome);
+    db_ui_bind_click(bk_lv_tool_ui.settings_btn_back, nav_home_cb);
+    db_ui_bind_click(bk_lv_tool_ui.settings_btn_gohome, nav_home_cb);
+    db_ui_bind_click(bk_lv_tool_ui.settings_btn_provision, settings_provision_cb);
+
+    if (bk_lv_tool_ui.settings_dd_lang)
+    {
+        lv_obj_remove_event_cb(bk_lv_tool_ui.settings_dd_lang, settings_lang_cb);
+        lv_dropdown_set_selected(bk_lv_tool_ui.settings_dd_lang, doorbell_ui_lang());
+        lv_obj_add_event_cb(bk_lv_tool_ui.settings_dd_lang, settings_lang_cb,
+                            LV_EVENT_VALUE_CHANGED, NULL);
+    }
+    if (bk_lv_tool_ui.settings_sld_vol)
+    {
+        lv_obj_remove_event_cb(bk_lv_tool_ui.settings_sld_vol, settings_vol_cb);
+        lv_obj_add_event_cb(bk_lv_tool_ui.settings_sld_vol, settings_vol_cb,
+                            LV_EVENT_VALUE_CHANGED, NULL);
+        settings_vol_refresh_locked();
+    }
+    doorbell_ui_apply_lang();
+}
+
+static void doorbell_ui_bind_provisioning_locked(void)
+{
+    db_ui_pass_clicks(bk_lv_tool_ui.provisioning_ic_back);
+    db_ui_pass_clicks(bk_lv_tool_ui.provisioning_ic_gohome);
+    db_ui_bind_click(bk_lv_tool_ui.provisioning_btn_back, nav_home_cb);
+    db_ui_bind_click(bk_lv_tool_ui.provisioning_btn_gohome, nav_home_cb);
+    doorbell_ui_apply_lang();
+}
+
 void doorbell_ui_goto(doorbell_ui_page_t page)
 {
     if (!s_lvgl_ready)
@@ -392,6 +645,7 @@ void doorbell_ui_goto(doorbell_ui_page_t page)
         case DB_UI_PAGE_HOME:
             navigate_to_screen(&bk_lv_tool_ui.home, LV_SCR_LOAD_ANIM_NONE, 0, 0, false,
                                init_page_home);
+            doorbell_ui_bind_home_locked();
             break;
         case DB_UI_PAGE_PROVISIONING:
             navigate_to_screen(&bk_lv_tool_ui.provisioning, LV_SCR_LOAD_ANIM_NONE, 0, 0, false,
@@ -399,10 +653,12 @@ void doorbell_ui_goto(doorbell_ui_page_t page)
             /* Pages are created lazily; after navigate the labels exist, so override
              * the generated placeholder text with real values. */
             db_ui_fill_device_info_locked();
+            doorbell_ui_bind_provisioning_locked();
             break;
         case DB_UI_PAGE_SETTINGS:
             navigate_to_screen(&bk_lv_tool_ui.settings, LV_SCR_LOAD_ANIM_NONE, 0, 0, false,
                                init_page_settings);
+            doorbell_ui_bind_settings_locked();
             break;
         default:
             break;
@@ -416,14 +672,13 @@ void doorbell_ui_request_provisioning(void)
      *    NV and stop the current STA, returning the device to the "unprovisioned"
      *    state so the old network does not auto-reconnect in the background and
      *    interfere with this provisioning. */
+    s_wifi_connected = false;
     doorbell_netcfg_erase();
 
-    /* 2) Switch to the provisioning page immediately and show a waiting hint (do not
-     *    wait for the BLE RUNNING callback, so the key feels more responsive). Pages
-     *    are created lazily; after goto the device-info labels are already filled by
-     *    doorbell_ui_goto. */
+    /* 2) Switch to the provisioning page immediately (do not wait for the BLE
+     *    RUNNING callback, so the key feels more responsive). Keep the designed
+     *    title "蓝牙配网"; simhei_40 still lacks glyphs for "等待手机配网...". */
     doorbell_ui_goto(DB_UI_PAGE_PROVISIONING);
-    doorbell_ui_set_status("Waiting for phone...");
 
     /* 3) Start BLE provisioning to wait for the phone to send new credentials. The
      *    RUNNING state callback (doorbell_ui_on_netcfg_event) re-confirms the page
@@ -453,13 +708,13 @@ void doorbell_ui_set_status(const char *text)
         return;
     }
 
-    /* The redesigned provisioning page dropped the dedicated status pill/label;
-     * reuse the QR subtitle line (default "Bluetooth (BLE) Provisioning") to show
-     * transient status such as "Waiting for phone...". */
+    /* Keep the designed title "蓝牙配网". "等待手机配网..." / "连接失败，重试中..."
+     * still use glyphs that simhei_40 does not contain. */
+    LOGI("provisioning status: %s\r\n", text);
     lv_vendor_disp_lock();
     if (bk_lv_tool_ui.provisioning_qr_subtitle)
     {
-        lv_label_set_text(bk_lv_tool_ui.provisioning_qr_subtitle, text);
+        lv_label_set_text(bk_lv_tool_ui.provisioning_qr_subtitle, doorbell_ui_str_prov_title());
     }
     lv_vendor_disp_unlock();
 }
@@ -577,10 +832,11 @@ static void doorbell_ui_on_netcfg_event(dbnp_ui_event_t ev, void *user)
     switch (ev)
     {
         case DBNP_UI_PROVISIONING:
+            s_wifi_connected = false;
             if (s_lvgl_ready)
             {
                 doorbell_ui_goto(DB_UI_PAGE_PROVISIONING);
-                doorbell_ui_set_status("Waiting for phone...");
+                doorbell_ui_set_status("蓝牙配网");
             }
             else
             {
@@ -590,6 +846,7 @@ static void doorbell_ui_on_netcfg_event(dbnp_ui_event_t ev, void *user)
 
         case DBNP_UI_SUCCESS:
             /* D2: on provisioning success return to home immediately, no lingering hint. */
+            s_wifi_connected = true;
             if (s_lvgl_ready)
             {
                 doorbell_ui_goto(DB_UI_PAGE_HOME);
@@ -601,9 +858,19 @@ static void doorbell_ui_on_netcfg_event(dbnp_ui_event_t ev, void *user)
             break;
 
         case DBNP_UI_FAILED:
+            s_wifi_connected = false;
             if (s_lvgl_ready)
             {
-                doorbell_ui_set_status("Connect failed, retrying...");
+                doorbell_ui_set_wifi_connected(false);
+                doorbell_ui_set_status("连接失败，重试中...");
+            }
+            break;
+
+        case DBNP_UI_DISCONNECTED:
+            s_wifi_connected = false;
+            if (s_lvgl_ready)
+            {
+                doorbell_ui_set_wifi_connected(false);
             }
             break;
 
@@ -622,6 +889,10 @@ bk_err_t doorbell_ui_init(void)
      * provisioning state is captured. LVGL is not started here; it starts after the
      * boot media finishes playing (doorbell_ui_on_boot_media_done). */
     doorbell_netcfg_set_ui_event_cb(doorbell_ui_on_netcfg_event, NULL);
+    bk_event_register_cb(EVENT_MOD_NETIF, EVENT_NETIF_GOT_IP4,
+                         doorbell_ui_wifi_event_cb, NULL);
+    bk_event_register_cb(EVENT_MOD_WIFI, EVENT_WIFI_STA_DISCONNECTED,
+                         doorbell_ui_wifi_event_cb, NULL);
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
     /* Register the multimedia service state callback: exit LVGL and switch to the
@@ -655,7 +926,7 @@ void doorbell_ui_on_boot_media_done(bk_err_t result, void *user_data)
     if (want_prov)
     {
         doorbell_ui_goto(DB_UI_PAGE_PROVISIONING);
-        doorbell_ui_set_status("Waiting for phone...");
+        doorbell_ui_set_status("蓝牙配网");
         LOGI("first screen: provisioning\r\n");
     }
     else

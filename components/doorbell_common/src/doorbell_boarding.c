@@ -502,4 +502,25 @@ void doorbell_boarding_event_notify_with_data(uint16_t opcode, int status, char 
     ble_boarding_notify(data, length + 5);
 }
 
+/*
+ * Deliberately a no-op on this legacy boarding path.
+ *
+ * doorbell_core.c calls this from DBEVT_BLE_DISABLE, just before
+ * bk_bluetooth_deinit(), so the provisioning layer is released together with
+ * the stack it registered its GATT service in. The doorbell_netcfg transport
+ * needs that (see doorbell_netcfg.c), otherwise a re-provision finds
+ * bk_ble_provisioning_init() already initialised, skips wifi_boarding_init()
+ * and never re-registers the characteristics.
+ *
+ * Keeping it empty here preserves the exact pre-existing behaviour of the
+ * projects on this path (doorbell, doorbell_lp, doorbell_lp_QN128B832,
+ * doorbell_multi_session), which never released boarding on BLE disable. They
+ * are battery/low-power designs that cold boot between sessions, so the stale
+ * state is reset anyway. If a re-provision-without-reboot flow is ever added
+ * there, call ble_boarding_deinit() from here.
+ */
+void doorbell_boarding_ble_disable(void)
+{
+}
+
 #endif /* !CONFIG_DOORBELL_NETCFG */

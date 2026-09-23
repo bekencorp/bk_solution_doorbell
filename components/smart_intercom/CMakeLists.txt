@@ -18,7 +18,6 @@ elseif (CONFIG_INTEGRATION_DOORBELL)
 		src/doorbell_rpc_service.c
 		src/doorbell_rpc_camera.c
 		src/doorbell_rpc_audio.c
-		src/doorbell_rpc_lcd.c
 		src/doorbell_rpc_video_intercom.c
 		src/doorbell_rpc_misc.c
 		src/doorbell_rpc_solution.c

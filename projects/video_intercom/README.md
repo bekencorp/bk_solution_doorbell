@@ -135,7 +135,6 @@ components/smart_intercom
 │   ├── doorbell_rpc_service.c        # service.setType (switch TCP/UDP service)
 │   ├── doorbell_rpc_camera.c         # camera.turnOn/turnOff/getStatus
 │   ├── doorbell_rpc_audio.c          # audio.turnOn/turnOff/getStatus/setAcoustics
-│   ├── doorbell_rpc_lcd.c            # lcd.turnOn/turnOff/getStatus
 │   ├── doorbell_rpc_video_intercom.c # videoIntercom.turnOn/turnOff (one-shot two-way)
 │   ├── doorbell_rpc_misc.c           # misc.ping
 │   ├── doorbell_rpc_solution.c       # solution.getConfig (capability advertise)
@@ -278,7 +277,6 @@ method table dispatch (15 entries) → doorbell_rpc_*.fn(params, id)
 | `doorbell.service.setType` | switch LAN UDP/TCP service |
 | `doorbell.camera.turnOn` / `turnOff` / `getStatus` | single-direction image transfer (uplink capture + local preview) on/off/status |
 | `doorbell.audio.turnOn` / `turnOff` / `getStatus` / `setAcoustics` | full-duplex audio on/off/status/AEC params |
-| `doorbell.lcd.turnOn` / `turnOff` / `getStatus` | LCD on/off/status |
 | `doorbell.videoIntercom.turnOn` / `turnOff` | one-shot two-way video intercom (uplink transfer + downlink receive/display) |
 | `doorbell.misc.ping` | liveness probe |
 | `doorbell.solution.getConfig` | advertise device capabilities |

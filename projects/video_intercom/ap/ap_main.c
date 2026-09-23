@@ -22,6 +22,8 @@
 #include <doorbell_comm.h>
 #include "doorbell_ipc_msg.h"
 #include "doorbell_keepalive.h"
+#include "doorbell_devices.h"
+#include "doorbell_cmd.h"
 #include "ui/doorbell_ui.h"
 #include "osd/lcd_osd.h"
 #include "doorbell_netcfg.h"
@@ -241,6 +243,25 @@ int main(void)
      * brings up SDK bk_network_provisioning (BLE provisioning + default
      * reconnect). No separate provisioning init call is needed here. */
     doorbell_core_init();
+
+    /* Claim the panel for the device, permanently. doorbell.lcd.turnOn/turnOff
+     * were removed, so nothing else ever sets db_device_info->lcd_enable - and
+     * that flag still gates the single-view preview GPU attach inside
+     * doorbell_camera_turn_on(). Without this call the local preview would stay
+     * black. Must run after doorbell_core_init() -> doorbell_devices_init(),
+     * which allocates db_device_info. app_mipi_lcd_turn_on() underneath is
+     * refcounted, so this coexists with the boot media still holding the panel.
+     *
+     * Deliberately NOT paired with doorbell_mm_service_vote(MM_STATUS_LCD_BIT):
+     * that bitmap means "a multimedia service is running", and its idle->active
+     * edge drives doorbell_ui_on_mm_status() -> doorbell_ui_set_call_active(),
+     * i.e. the LVGL teardown that hands the panel to the video pipeline. Voting
+     * it here would make the UI believe a call started at boot and tear LVGL
+     * down immediately ("boot done during call"), killing touch input. */
+    if (doorbell_display_turn_on(app_display_board_config_get()) != BK_OK)
+    {
+        BK_LOGE("ap-main", "claim panel failed, local preview will not render\n");
+    }
 #endif
 
 #if CONFIG_VOICE_SERVICE_TEST

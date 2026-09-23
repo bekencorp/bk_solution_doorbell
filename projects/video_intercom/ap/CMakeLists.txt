@@ -1,6 +1,6 @@
 set(incs . osd)
 
-set(srcs ap_main.c key_map.c ui/doorbell_ui.c osd/lcd_osd.c osd/lcd_osd_blend_dsc.c osd/resources/lcd_osd_font.c osd/resources/lcd_osd_wifi.c )
+set(srcs ap_main.c key_map.c ui/doorbell_ui.c ui/doorbell_ui_i18n.c osd/lcd_osd.c osd/lcd_osd_blend_dsc.c osd/resources/lcd_osd_font.c osd/resources/lcd_osd_wifi.c )
 
 if (CONFIG_AUD_PARAM_CTRL)
     list(APPEND incs ./audio_param)
@@ -12,11 +12,8 @@ endif()
 # replaced as a whole directory after re-exporting from the PC tool.
 include(${CMAKE_CURRENT_LIST_DIR}/beken_generated/beken_generated.cmake)
 
-# 720x1280 UI: the home-page camera mockup is the generated 683x1024 RGB565A8 C
-# bitmap (~2.0MB in flash), which fits the enlarged AP partition directly (see
-# partitions/bk7259). No re-encoding workaround is needed anymore (the previous
-# 1024x1536 RGB565A8 was ~4.5MB and had to be re-encoded to RGB565); the smaller
-# portrait asset is linked straight from beken_generated/image.
+# 720x1280 UI: fonts/images under beken_generated/ are globbed by
+# beken_generated.cmake and linked into the enlarged AP partition.
 list(APPEND srcs ${BEKEN_GENERATOR_SOURCES})
 list(APPEND incs ${BEKEN_GENERATOR_INCLUDE_DIRS})
 

@@ -13,9 +13,9 @@ extern "C" {
 /**
  * @brief Downlink display compositor configuration.
  *
- * The compositor drives the on-board DPU/LCD (already powered on via
- * doorbell.lcd.turnOn) with the decoded remote picture as the main surface and
- * the local ISP SP channel as a Picture-in-Picture self-view overlay.
+ * The compositor drives the on-board DPU/LCD (powered on at boot and kept on
+ * for the whole session) with the decoded remote picture as the main surface
+ * and the local ISP SP channel as a Picture-in-Picture self-view overlay.
  */
 typedef struct
 {

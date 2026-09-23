@@ -132,35 +132,6 @@ static cJSON *p_audio_set_acoustics(void)
     return p;
 }
 
-static cJSON *p_lcd_turn_on(void)
-{
-    cJSON *p = cJSON_CreateObject();
-    cJSON *cfg;
-    cJSON *mipi;
-
-    if (p == NULL)
-    {
-        return NULL;
-    }
-    cJSON_AddStringToObject(p, "lcdType", "mipi");
-
-    cfg = cJSON_CreateObject();
-    mipi = cJSON_CreateObject();
-    if (cfg == NULL || mipi == NULL)
-    {
-        if (cfg != NULL) cJSON_Delete(cfg);
-        if (mipi != NULL) cJSON_Delete(mipi);
-        return p;
-    }
-    cJSON_AddStringToObject(mipi, "sensorName", "er68576b");
-    cJSON_AddNumberToObject(mipi, "sensorId", 1);
-    cJSON_AddNumberToObject(mipi, "width", 720);
-    cJSON_AddNumberToObject(mipi, "height", 1280);
-    cJSON_AddItemToObject(cfg, "mipi", mipi);
-    cJSON_AddItemToObject(p, "lcdConfig", cfg);
-    return p;
-}
-
 static cJSON *p_image_set_recv_config(void)
 {
     cJSON *p = cJSON_CreateObject();
@@ -309,9 +280,9 @@ bk_err_t doorbell_rpc_solution_get_config(cJSON *params, cJSON *id)
     cfg_add  (configs, "doorbell.audio.getStatus");
     cfg_add_p(configs, "doorbell.audio.turnOn",                p_audio_turn_on());
     cfg_add  (configs, "doorbell.audio.turnOff");
-    cfg_add_p(configs, "doorbell.lcd.turnOn",                  p_lcd_turn_on());
-    cfg_add  (configs, "doorbell.lcd.turnOff");
-    cfg_add  (configs, "doorbell.lcd.getStatus");
+    /* No doorbell.lcd.* here: the panel is owned by the device. It lights up at
+     * boot and runs the LVGL UI for the rest of the session, so there is no
+     * remote screen on/off to advertise. */
     cfg_add_p(configs, "doorbell.audio.setAcoustics",          p_audio_set_acoustics());
     cfg_add  (configs, "doorbell.misc.ping");
     cfg_add  (configs, "doorbell.notify.heartbeat");
