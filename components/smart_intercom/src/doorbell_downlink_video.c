@@ -9,6 +9,7 @@
 #include <components/bk_flexa_bond.h>
 
 #include "app_gpu.h"
+#include "gpu_core.h"
 #include "doorbell_devices.h"
 #include "doorbell_devices_intercom.h"
 #include "doorbell_downlink_img_manager.h"
@@ -48,9 +49,8 @@
  * 720p intercom with concurrent uplink uses seg=3 (same minimum as 1080p: seg=2
  * stalls the FLEXA H264 decode<->GPU bond with vcdec timeout 0x401). seg=3
  * pp_buf (~92KB) + ping-pong (~60KB) leaves ~142KB HSRAM; compositor GPU also
- * needs VG-Lite contiguous + 10KB flexa thread stack (~146KB total). Reduce
- * CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ slightly (0x1E000 vs 0x20000) so seg=3
- * passes the dl_hsram_compositor_fits() gate. Do NOT drop below seg=3. */
+ * needs VG-Lite contiguous + 10KB flexa thread stack. VG-Lite heap size is
+ * calculated at runtime (blit-only, tess=0). Do NOT drop below seg=3. */
 #define DL_SEG_NUM_SHALLOW_UPLINK  3U
 #define DL_SEG_NUM_SHALLOW_720_INTERCOM  DL_SEG_NUM_SHALLOW_UPLINK
 #define DL_SEG_NUM_SHALLOW_1080    DL_SEG_NUM_SHALLOW_UPLINK
@@ -120,36 +120,13 @@
 /* Compositor GPU HSRAM beyond pp_buf/ping-pong (bk_gpu_init + bk_gpu_open).
  * ping-pong is held during this check but released before bk_gpu_open()
  * re-allocates the same block, so do not double-count it in the budget.
- * Concurrent 720p intercom needs seg=3 (~142KB post-reserve free); cap the
- * VG-Lite budget at 0x1E000 so the gate matches video_intercom defconfig
- * (0x20000 leaves ~10KB after init -- not enough for the 10KB flexa thread). */
-#ifdef CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ
-#define DL_GPU_VG_CONTIGUOUS_BYTES  ((uint32_t)CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ)
-#else
-#define DL_GPU_VG_CONTIGUOUS_BYTES  (128U * 1024U)
-#endif
-/* Concurrent uplink+downlink 720p seg=3 leaves ~1.7KB too little HSRAM for the
- * GPU flexa thread stack when VG=0x1E000 (runtime evidence: decoder init/open
- * itself consumes ~10KB HSRAM, GPU ping-pong 61504 + thread 10240 on top). VG
- * 0x1C000 cleared GPU thread creation (~5.5KB steady margin, runtime-confirmed)
- * but that residual ~5.5KB is then eaten by the DPU per-flush viv_interface
- * (allocated from HSRAM via nano_malloc_wrapper->hsram_malloc) plus the PIP SP
- * cam_reader stack, so once PIP is enabled the DPU flush's HSRAM alloc fails
- * ("dev_ioctl: malloc iface failed") -> DPU stops (rps->0) -> GPU output pool is
- * never drained -> GPU stalls -> H264d<->GPU FLEXA ring never advances ->
- * "decode timeout irq_status=0x401" -> both windows freeze. The GPU only does
- * image blits (no vector tessellation) and command buffers are 2*0x2000=16KB, so
- * 0x14000 (81920) of VG-Lite contiguous is ample for the 1280x720->1920x1088
- * blit + 320x180 PIP overlay (AI-solution projects run the GPU with 0x12000).
- * Dropping VG to 0x14000 frees 32KB of HSRAM, lifting the steady margin to ~38KB
- * so the DPU per-flush alloc + PIP always fit. */
-#define DL_GPU_VG_INTERCOM_MAX_BYTES  (0x14000U)
+ * VG-Lite contiguous size comes from vg_lite_set_mem_config() (tess=0 blit). */
 #define DL_GPU_FLEXA_STACK_BYTES      (10U * 1024U)
 #define DL_GPU_HSram_HEADROOM         (0U)
 
 static uint32_t dl_gpu_vg_budget_bytes(void)
 {
-    return DL_GPU_VG_CONTIGUOUS_BYTES;
+    return bk_gpu_vg_lite_apply_mem_config(0, 0);
 }
 
 typedef struct
@@ -458,15 +435,16 @@ static uint32_t dl_hsram_compositor_need_bytes(void)
 
 static bool dl_hsram_compositor_fits(void)
 {
-    size_t free_bytes = rtos_get_hsram_free_heap_size();
-    uint32_t need = dl_hsram_compositor_need_bytes();
+    uint32_t vg_bytes = dl_gpu_vg_budget_bytes();
+    uint32_t need;
 
-    if (DL_GPU_VG_CONTIGUOUS_BYTES > DL_GPU_VG_INTERCOM_MAX_BYTES)
+    if (vg_bytes == 0)
     {
         return false;
     }
 
-    return free_bytes >= need;
+    need = vg_bytes + DL_GPU_FLEXA_STACK_BYTES + DL_GPU_HSram_HEADROOM;
+    return rtos_get_hsram_free_heap_size() >= need;
 }
 
 /* Reserve compositor GPU ping-pong first, then the FLEXA decode ring. Probing
@@ -537,17 +515,10 @@ static bk_err_t dl_hsram_alloc_pp_buf(uint16_t width, uint16_t height,
             dl_hsram_aligned_free(pp);
             hsram_free(ping);
             s_dl_pingpong_hold = NULL;
-            if (DL_GPU_VG_CONTIGUOUS_BYTES > DL_GPU_VG_INTERCOM_MAX_BYTES)
-            {
-                LOGW("DL HSRAM: VG cfg 0x%x > intercom max 0x%x, rebuild with "
-                     "CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ=0x14000\n",
-                     (unsigned)DL_GPU_VG_CONTIGUOUS_BYTES,
-                     (unsigned)DL_GPU_VG_INTERCOM_MAX_BYTES);
-            }
-            LOGW("DL HSRAM: compositor budget fail seg=%u free=%u need>=%u vg_cfg=0x%x\n",
+            LOGW("DL HSRAM: compositor budget fail seg=%u free=%u need>=%u vg=%u\n",
                  (unsigned)seg, (unsigned)rtos_get_hsram_free_heap_size(),
                  (unsigned)dl_hsram_compositor_need_bytes(),
-                 (unsigned)DL_GPU_VG_CONTIGUOUS_BYTES);
+                 (unsigned)dl_gpu_vg_budget_bytes());
             seg--;
             continue;
         }
@@ -556,10 +527,10 @@ static bk_err_t dl_hsram_alloc_pp_buf(uint16_t width, uint16_t height,
         *out_seg_num = seg;
         *out_pp_buf = pp;
         *out_pp_size = pp_size;
-        LOGI("DL HSRAM: seg=%u pp=%u ping=%u reserved free=%u vg_cfg=0x%x\n",
+        LOGI("DL HSRAM: seg=%u pp=%u ping=%u reserved free=%u vg=%u\n",
              (unsigned)seg, (unsigned)pp_size, (unsigned)ping_sz,
              (unsigned)rtos_get_hsram_free_heap_size(),
-             (unsigned)DL_GPU_VG_CONTIGUOUS_BYTES);
+             (unsigned)dl_gpu_vg_budget_bytes());
         if (seg != ideal_seg)
         {
             LOGW("DL HSRAM: using seg=%u (ideal=%u) for concurrent uplink\n",
@@ -976,13 +947,8 @@ static bk_err_t dl_start(const doorbell_downlink_h264_config_t *cfg)
                                    &s_dl.pp_buf, &s_dl.pp_size);
     if (bk_ret != BK_OK)
     {
-        LOGE("alloc pp_buf failed seg=%u\n", (unsigned)seg_num);
-        if (DL_GPU_VG_CONTIGUOUS_BYTES > DL_GPU_VG_INTERCOM_MAX_BYTES)
-        {
-            LOGE("DL HSRAM: rebuild with CONFIG_VG_LITE_GPU_CONTIGUOUS_MEM_SZ=0x14000 "
-                 "(runtime 0x%x is too large for seg=3 intercom)\n",
-                 (unsigned)DL_GPU_VG_CONTIGUOUS_BYTES);
-        }
+        LOGE("alloc pp_buf failed seg=%u vg=%u\n",
+             (unsigned)seg_num, (unsigned)dl_gpu_vg_budget_bytes());
         if (!doorbell_devices_uplink_active() && s_dl_concurrent_uplink == 0U)
         {
             (void)doorbell_devices_preview_gpu_attach();

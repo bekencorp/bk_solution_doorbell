@@ -38,7 +38,7 @@ endif()
 endif() # CONFIG_SMART_INTERCOM
 
 set(req doorbell_common media_utils bk_network_transfer avdk_utils lwip_intf_v2_1 bk_wifi_driver cs2p2p bk_bluetooth multimedia_device_service bk_peripheral media_service bk_asr_service bk_vfs json)
-set(priv_req)
+set(priv_req avdk_driver)
 if (CONFIG_DOOR_ACCESS_CALL_FLOW)
 	list(APPEND priv_req bk_draw_osd)
 endif()
