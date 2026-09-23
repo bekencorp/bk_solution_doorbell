@@ -118,6 +118,19 @@ CONFIG_LVGL_V9=y
 CONFIG_LVGL_TASK_PRIORITY=4
 CONFIG_LVGL_TASK_STACK_SIZE=8192
 CONFIG_LVGL_FRAME_BUFFER_NUM=2
+
+# Capacitive touch panel (LVGL pointer indev for home/settings/provisioning
+# buttons). Auto-detects the controller on the software-I2C bus.
+# NOTE: RST/INT/SDA/SCL pins below are the BK7259 EVB LVGL reference defaults
+# (projects/lvgl/widgets_v9). VERIFY them against the video_intercom board
+# schematic before flashing - wrong pins can stall the boot I2C probe.
+# Console UART0 is GPIO_10/11 on this board, so GPIO_0/1 are free for TP I2C.
+CONFIG_TP=y
+CONFIG_TP_RST_PIN=5
+CONFIG_TP_INT_PIN=6
+CONFIG_TP_I2C_SDA_PIN=1
+CONFIG_TP_I2C_SCL_PIN=0
+CONFIG_TP_GT911=y
 CONFIG_LITTLEFS=y
 CONFIG_LITTLEFS_NO_CONFIG_PARTITION=y
 CONFIG_LWIP_MEM_LIBC_MALLOC_USE_PSRAM=y

@@ -1,12 +1,16 @@
 #include <common/bk_include.h>
 #include <os/os.h>
 #include <os/mem.h>
+#include <os/str.h>
 #include <common/avdk_pixel_types.h>
 #include <components/log.h>
 #include <components/bk_frame_buffer.h>
 #include <components/bk_hardware_ram.h>
 #include <components/bk_gpu_ctlr.h>
 #include <components/bk_gpu.h>
+#if CONFIG_DOOR_ACCESS_CALL_FLOW
+#include <components/bk_draw_osd.h>
+#endif
 #include <components/bk_isp_camera.h>
 #include <driver/isp_base.h>
 #include <driver/hpdma.h>
@@ -120,6 +124,21 @@ typedef struct
     comp_pool_entry_t pip_pool[COMP_PIP_POOL_COUNT];
     uint32_t pip_pool_size;
     uint32_t pip_pool_count;
+
+#if CONFIG_DOOR_ACCESS_CALL_FLOW
+    /* Hang-up OSD via the public bk_draw_osd controller (indoor-display call-flow only).
+     * video_intercom PIP uses bk_gpu_blit_set() on the same overlay, so this
+     * handle is compiled out unless CONFIG_DOOR_ACCESS_CALL_FLOW (PIP off). */
+    bk_draw_osd_ctlr_handle_t osd;
+    /* Element table behind the OSD dynamic list. osd_assets[] is the
+     * name -> descriptor table handed to bk_draw_osd_new, which keeps the
+     * pointer for the instance lifetime; the dynamic list stores only the
+     * osd_blend[] pointers, so replacing an element's pixels is an in-place
+     * edit of its descriptor plus a dirty mark. */
+    bk_blend_t   osd_blend[DOORBELL_OSD_SPRITE_MAX];
+    blend_info_t osd_assets[DOORBELL_OSD_SPRITE_MAX + 1U];
+    uint8_t      osd_elem_count;
+#endif
 } comp_ctx_t;
 
 static comp_ctx_t s_comp = {0};
@@ -163,6 +182,9 @@ static void *comp_out_alloc(uint32_t size)
      * NULL only skips one GPU frame and self-heals once the DPU releases. */
     if (ptr == NULL)
     {
+        /* Transient safety-net buffer (pool momentarily exhausted): keep it plain
+         * cached - do not spend one of the 4 scarce write-through areas on a
+         * short-lived frame. */
         ptr = bk_frame_buffer_malloc(MEM_SLAB_HEAP_UNCODED, size);
     }
     return ptr;
@@ -376,6 +398,8 @@ static avdk_err_t comp_pip_pool_init(uint32_t buf_size)
     }
     for (i = 0; i < COMP_PIP_POOL_COUNT; i++)
     {
+        /* PIP self-view is small and low-value; use plain cached buffers so the 4
+         * scarce write-through areas stay reserved for the main out_pool. */
         s_comp.pip_pool[i].buf = bk_frame_buffer_malloc(MEM_SLAB_HEAP_UNCODED, buf_size);
         s_comp.pip_pool[i].in_use = 0U;
         if (s_comp.pip_pool[i].buf == NULL)
@@ -1113,6 +1137,17 @@ void doorbell_compositor_stop(void)
         s_comp.pip_enable = false;
     }
 
+#if CONFIG_DOOR_ACCESS_CALL_FLOW
+    /* Tear the OSD controller down while the GPU is still alive; bk_draw_osd_delete
+     * releases the overlay layers it leased. */
+    if (s_comp.osd != NULL)
+    {
+        (void)bk_draw_osd_delete(s_comp.osd);
+        s_comp.osd = NULL;
+    }
+    s_comp.osd_elem_count = 0U;
+#endif
+
     if (s_comp.gpu != NULL)
     {
         (void)bk_gpu_close(s_comp.gpu);
@@ -1149,3 +1184,212 @@ bool doorbell_compositor_is_running(void)
 {
     return (s_comp.gpu != NULL && s_comp.running != 0U);
 }
+
+#if CONFIG_DOOR_ACCESS_CALL_FLOW
+/* ------------------------------------------------------------------ */
+/* OSD sprite (hang-up button) via public bk_draw_osd — indoor-display */
+/* ------------------------------------------------------------------ */
+
+static bk_err_t comp_osd_ensure(uint16_t rotate)
+{
+    osd_ctlr_config_t cfg;
+    avdk_err_t ret;
+
+    if (s_comp.osd != NULL)
+    {
+        return BK_OK;
+    }
+
+    os_memset(&cfg, 0, sizeof(cfg));
+    cfg.gpu = s_comp.gpu;
+    /* GPU flexa dst (out_disp_w/h) is pre-rotation, e.g. 1280x720 @ 90deg.
+     * The composed buffer the overlay blit targets is the post-rotation panel
+     * (720x1280). doorbell_call already places the hang-up sprite in that
+     * portrait space, matching draw_osd_example MIPI (panel after rotate90,
+     * osd_rotate_degree=0). */
+    if (s_comp.out_rotate == 90U || s_comp.out_rotate == 270U)
+    {
+        cfg.panel_w = s_comp.out_disp_h;
+        cfg.panel_h = s_comp.out_disp_w;
+    }
+    else
+    {
+        cfg.panel_w = s_comp.out_disp_w;
+        cfg.panel_h = s_comp.out_disp_h;
+    }
+    cfg.osd_rotate_degree = rotate;
+    /* Hang-up asset is packed (A<<24)|(R<<16)|(G<<8)|B, matching ARGB8888 overlay. */
+    cfg.src_format = BK_PIXEL_FORMAT_ARGB8888;
+    /* Asset table must already be filled: bk_draw_osd_new captures its size
+     * here and the elements are then added to the dynamic list by name. */
+    cfg.blend_assets = s_comp.osd_assets;
+    cfg.blend_info = NULL;
+
+    ret = bk_draw_osd_new(&s_comp.osd, &cfg);
+    if (ret != AVDK_ERR_OK)
+    {
+        s_comp.osd = NULL;
+        LOGE("bk_draw_osd_new failed=%d\n", (int)ret);
+        return BK_FAIL;
+    }
+    return BK_OK;
+}
+
+/* Copy one sprite's geometry and pixel pointer into its element descriptor.
+ * Returns true when the element now differs from what is on screen. */
+static bool comp_osd_blend_update(bk_blend_t *blend, const doorbell_osd_sprite_t *sprite)
+{
+    bool changed = blend->image.data != (const uint8_t *)sprite->argb8888 ||
+                   blend->width != (uint32_t)sprite->width ||
+                   blend->height != (uint32_t)sprite->height ||
+                   blend->xpos != sprite->dst_x ||
+                   blend->ypos != sprite->dst_y;
+
+    blend->blend_type = BLEND_TYPE_IMAGE;
+    blend->width = sprite->width;
+    blend->height = sprite->height;
+    blend->xpos = sprite->dst_x;
+    blend->ypos = sprite->dst_y;
+    blend->image.format = ARGB8888;
+    blend->image.data_len = (uint32_t)sprite->width * (uint32_t)sprite->height * 4U;
+    blend->image.data = (const uint8_t *)sprite->argb8888;
+    return changed;
+}
+
+static bool comp_osd_table_matches(const doorbell_osd_sprite_t *sprites, uint8_t count)
+{
+    uint8_t i;
+
+    if (count != s_comp.osd_elem_count)
+    {
+        return false;
+    }
+    for (i = 0U; i < count; i++)
+    {
+        if (os_strcmp(s_comp.osd_assets[i].name, sprites[i].name) != 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void comp_osd_table_build(const doorbell_osd_sprite_t *sprites, uint8_t count)
+{
+    uint8_t i;
+
+    /* bk_blend_t has a const name[] member, so the descriptors are zeroed and
+     * filled field by field rather than assigned. name is only used as fallback
+     * text for FONT elements and stays empty for these image sprites. */
+    os_memset(s_comp.osd_blend, 0, sizeof(s_comp.osd_blend));
+    os_memset(s_comp.osd_assets, 0, sizeof(s_comp.osd_assets));
+
+    for (i = 0U; i < count; i++)
+    {
+        (void)comp_osd_blend_update(&s_comp.osd_blend[i], &sprites[i]);
+        os_strncpy(s_comp.osd_assets[i].name, sprites[i].name, MAX_BLEND_NAME_LEN - 1U);
+        s_comp.osd_assets[i].addr = &s_comp.osd_blend[i];
+    }
+    /* osd_assets[count].addr stays NULL: asset table terminator. */
+    s_comp.osd_elem_count = count;
+}
+
+bk_err_t doorbell_compositor_osd_show_n(const doorbell_osd_sprite_t *sprites, uint8_t count,
+                                        uint16_t rotate)
+{
+    avdk_err_t ret;
+    uint8_t i;
+
+    if (sprites == NULL || count == 0U)
+    {
+        return BK_ERR_PARAM;
+    }
+    if (count > DOORBELL_OSD_SPRITE_MAX)
+    {
+        count = (uint8_t)DOORBELL_OSD_SPRITE_MAX;
+    }
+    for (i = 0U; i < count; i++)
+    {
+        if (sprites[i].argb8888 == NULL || sprites[i].width == 0U ||
+            sprites[i].height == 0U || sprites[i].name == NULL ||
+            sprites[i].name[0] == '\0')
+        {
+            return BK_ERR_PARAM;
+        }
+    }
+    if (s_comp.gpu == NULL || s_comp.running == 0U)
+    {
+        return BK_ERR_STATE;
+    }
+
+    /* bk_draw_osd_new captures the asset table size, so a different element set
+     * needs a fresh instance. */
+    if (s_comp.osd != NULL && !comp_osd_table_matches(sprites, count))
+    {
+        (void)bk_draw_osd_delete(s_comp.osd);
+        s_comp.osd = NULL;
+    }
+
+    if (s_comp.osd == NULL)
+    {
+        comp_osd_table_build(sprites, count);
+        if (comp_osd_ensure(rotate) != BK_OK)
+        {
+            s_comp.osd_elem_count = 0U;
+            return BK_FAIL;
+        }
+        for (i = 0U; i < count; i++)
+        {
+            (void)bk_draw_osd_add_or_update(s_comp.osd, s_comp.osd_assets[i].name, NULL);
+        }
+    }
+    else
+    {
+        /* Mark only what moved or was repainted. Everything else keeps the
+         * overlay layer it is already composited from. */
+        for (i = 0U; i < count; i++)
+        {
+            if (comp_osd_blend_update(&s_comp.osd_blend[i], &sprites[i]) || sprites[i].dirty)
+            {
+                (void)bk_draw_osd_add_or_update(s_comp.osd, s_comp.osd_assets[i].name, NULL);
+            }
+        }
+    }
+
+    /* Dynamic list (NULL) instead of an explicit array: an explicit list forces
+     * a full repaint, which drops every layer's committed blit first. */
+    ret = bk_draw_osd_array(s_comp.osd, NULL);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGE("bk_draw_osd_array failed=%d count=%u\n", (int)ret, (unsigned)count);
+        return BK_FAIL;
+    }
+    return BK_OK;
+}
+
+bk_err_t doorbell_compositor_osd_show(const char *name, const void *argb8888,
+                                      uint16_t width, uint16_t height,
+                                      uint16_t dst_x, uint16_t dst_y, uint16_t rotate)
+{
+    doorbell_osd_sprite_t sprite;
+
+    os_memset(&sprite, 0, sizeof(sprite));
+    sprite.name = name;
+    sprite.argb8888 = argb8888;
+    sprite.width = width;
+    sprite.height = height;
+    sprite.dst_x = dst_x;
+    sprite.dst_y = dst_y;
+    sprite.dirty = true;
+    return doorbell_compositor_osd_show_n(&sprite, 1U, rotate);
+}
+
+bk_err_t doorbell_compositor_osd_hide(void)
+{
+    if (s_comp.osd != NULL)
+    {
+        (void)bk_draw_osd_clear(s_comp.osd);
+    }
+    return BK_OK;
+}
+#endif /* CONFIG_DOOR_ACCESS_CALL_FLOW */

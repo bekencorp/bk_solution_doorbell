@@ -22,6 +22,8 @@
      - 无屏 IPC：SC3336 2304×1296，共用 doorbell 业务栈
    * - isp_h264_tuning
      - ISP / H264E PC 端图像质量联调（Wi-Fi JSON-RPC）
+   * - intercom_indoor_display
+     - 室内对讲显示屏：720×1280 LVGL 界面、来电邀请/接听/挂断、开锁控制
 
 1. 依赖与目录
 -------------

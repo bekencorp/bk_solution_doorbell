@@ -6,6 +6,54 @@ menu "Video Intercom"
         help
             Enables the smart_intercom component sources.
 
+    config DOOR_ACCESS_CALL_FLOW
+        bool "Indoor-display incoming-call flow (ring / answer / hangup, full-screen remote)"
+        depends on SMART_INTERCOM
+        default n
+        help
+            Turns the smart_intercom two-way video path into an indoor-display
+            call flow (projects/intercom_indoor_display). The App-facing protocol is UNCHANGED
+            from video_intercom (same turnOn/turnOff request format, plain
+            result/error replies); only the reply timing changes:
+
+              - doorbell.videoIntercom.turnOn no longer starts media immediately
+                and its reply is DEFERRED. It is treated as an *incoming-call
+                invite* (ring): the device raises an INCOMING event to the local
+                UI and waits. Media (uplink + downlink) starts only when the
+                device user answers locally (touch / key), at which point the
+                pending turnOn is answered with a success result. A local decline,
+                a remote turnOff cancel, or a media start failure answers the
+                pending turnOn with an error instead - so the App sees the call
+                fail without any new message type.
+              - The local user hangs up an active call (touch / key / on-video OSD
+                button), which stops media (the turnOn was already answered).
+              - The decoded remote picture is shown full-screen; the local
+                camera self-view PIP small window is disabled (the local frame is
+                still encoded and uplinked to the App, just not blitted locally).
+
+            Leave this off for the stock video_intercom behavior (App-driven
+            one-shot turnOn/turnOff with the PIP self-view overlay).
+
+    config DOOR_ACCESS_CALL_LOCAL_UPLINK
+        bool "Local camera uplink (capture + H.264 + send to App) during a two-way call"
+        depends on DOOR_ACCESS_CALL_FLOW
+        default n
+        help
+            When set, an answered indoor-display call opens the local camera
+            uplink (capture + H.264 encode + video transfer to the App) in
+            addition to the downlink, i.e. the App also sees the indoor unit.
+
+            Left off (default) the answered call is downlink-only: the decoded
+            remote picture is shown full-screen and NO local image is captured,
+            encoded or sent to the App. The App-facing turnOn/turnOff protocol is
+            unchanged; the "uplink" parameters are simply accepted and ignored.
+            This is the usual indoor-monitor use case (watch the door camera
+            without publishing the room), and it also frees the encoder /
+            camera / GPU budget the uplink would otherwise consume.
+
+            Only affects DOOR_ACCESS_CALL_FLOW; stock video_intercom always
+            uplinks.
+
     config SMART_INTERCOM_DL_ZEROCOPY
         bool "Downlink video zero-copy (reassemble directly into decode slots)"
         depends on SMART_INTERCOM

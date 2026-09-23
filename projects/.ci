@@ -2,3 +2,4 @@ cd doorbell;./dbuild.sh make bk7259
 cd doorbell_lp;./dbuild.sh make bk7259
 cd doorbell_lp_QN128B832;./dbuild.sh make bk7259
 cd video_intercom;./dbuild.sh make bk7259
+cd intercom_indoor_display;./dbuild.sh make bk7259

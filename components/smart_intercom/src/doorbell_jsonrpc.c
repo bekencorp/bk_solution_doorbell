@@ -206,6 +206,20 @@ bk_err_t doorbell_notify_request_keyframe(const char *reason, const char *image_
     return doorbell_jsonrpc_send_notify("doorbell.notify.requestKeyFrame", params);
 }
 
+#if CONFIG_DOOR_ACCESS_CALL_FLOW
+bk_err_t doorbell_notify_video_intercom_ended(const char *reason)
+{
+    cJSON *params = cJSON_CreateObject();
+    if (params == NULL)
+    {
+        return BK_FAIL;
+    }
+    cJSON_AddStringToObject(params, "reason", (reason != NULL) ? reason : "hangup");
+    /* send_notify takes ownership of params. */
+    return doorbell_jsonrpc_send_notify("doorbell.notify.videoIntercomEnded", params);
+}
+#endif /* CONFIG_DOOR_ACCESS_CALL_FLOW */
+
 static void db_rpc_dispatch_request(const char *method, cJSON *params, cJSON *id)
 {
     uint32_t i;

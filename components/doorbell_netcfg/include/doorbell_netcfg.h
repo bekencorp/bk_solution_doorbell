@@ -47,6 +47,7 @@ typedef enum {
     DBNP_UI_PROVISIONING, /* entered provisioning (RUNNING / RECONNECT_FAILED fallback) */
     DBNP_UI_SUCCESS,      /* provisioning / reconnect succeeded */
     DBNP_UI_FAILED,       /* provisioning failed */
+    DBNP_UI_DISCONNECTED, /* STA dropped or reconnecting */
 } dbnp_ui_event_t;
 
 /** UI event callback prototype (invoked on the SDK provisioning thread). */

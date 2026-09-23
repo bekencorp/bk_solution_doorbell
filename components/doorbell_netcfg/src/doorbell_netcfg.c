@@ -495,6 +495,7 @@ static void dbnp_status_cb(bk_network_provisioning_status_t status, void *user_d
 			break;
 		case BK_NETWORK_PROVISIONING_STATUS_RECONNECTING:
 			LOGI("reconnecting...\r\n");
+			dbnp_ui_notify(DBNP_UI_DISCONNECTED);
 			break;
 		case BK_NETWORK_PROVISIONING_STATUS_RECONNECT_SUCCEED:
 			LOGI("reconnect succeed\r\n");

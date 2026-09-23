@@ -24,7 +24,8 @@
  *
  * LVGL frame buffers are sent straight to app_display's bk_display controller via
  * lv_vendor's flush_cb, consistent with the SDK reference project
- * projects/lvgl/widgets_v9.
+ * projects/lvgl/widgets_v9. Capacitive touch is opened once via drv_tp_open() so
+ * LVGL's pointer indev (lv_port_indev) can drive the generated CLICKED handlers.
  */
 
 #include <common/bk_include.h>
@@ -40,6 +41,9 @@
 #include "lvgl.h"
 #include "lv_vendor.h"
 #include "app_display.h"
+#if CONFIG_TP
+#include "driver/drv_tp.h"
+#endif
 
 #include "beken_ui.h"
 #include "event_runtime.h"
@@ -79,6 +83,9 @@ static volatile bool            s_boot_done;
 static volatile bool            s_pending_prov;     /* PROVISIONING event that arrived before LVGL was ready */
 static volatile bool            s_pending_success;  /* SUCCESS event that arrived before LVGL was ready */
 static volatile bool            s_call_active;      /* Two-way video call in progress: LVGL yields to the video pipeline */
+#if CONFIG_TP
+static bool                     s_tp_opened;        /* drv_tp_open is not idempotent; keep across LVGL rebuild */
+#endif
 
 static bk_display_ctlr_handle_t s_lcd_handle;
 static void                    *s_frame_buffer[CONFIG_LVGL_FRAME_BUFFER_NUM];
@@ -304,6 +311,26 @@ static bk_err_t doorbell_ui_start_lvgl(void)
         doorbell_ui_free_frame_buffers();
         return BK_FAIL;
     }
+
+#if CONFIG_TP
+    /* Open the capacitive touch panel once. LVGL's pointer indev (registered
+     * inside lv_vendor_init -> lv_port_indev_init) polls drv_tp_read; the
+     * controller is auto-probed on the CONFIG_TP_* software-I2C bus. Keep it
+     * open across LVGL teardown/rebuild during a video call so we do not leak
+     * the TP mutex/queue (drv_tp_open is not idempotent). */
+    if (!s_tp_opened)
+    {
+        if (drv_tp_open(DB_UI_PANEL_WIDTH, DB_UI_PANEL_HEIGHT, TP_MIRROR_NONE) != 0)
+        {
+            LOGW("drv_tp_open failed; UI touch unavailable\r\n");
+        }
+        else
+        {
+            s_tp_opened = true;
+            LOGI("touch panel opened %dx%d\r\n", DB_UI_PANEL_WIDTH, DB_UI_PANEL_HEIGHT);
+        }
+    }
+#endif
 
     /* Build the pages first (beken_ui_init internally creates and loads home), then
      * start the LVGL task. */

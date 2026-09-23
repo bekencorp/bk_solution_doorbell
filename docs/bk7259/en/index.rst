@@ -22,6 +22,8 @@ Example Projects
      - Headless IPC: SC3336 2304×1296, shared doorbell stack
    * - isp_h264_tuning
      - ISP / H264E PC-side tuning over Wi-Fi JSON-RPC
+   * - intercom_indoor_display
+     - Indoor intercom display: 720×1280 LVGL UI, invite/answer/hang-up, unlock control
 
 1. Dependencies
 ---------------

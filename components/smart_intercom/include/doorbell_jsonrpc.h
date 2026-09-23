@@ -45,6 +45,22 @@ bk_err_t doorbell_jsonrpc_send_notify(const char *method, void *params);
  */
 bk_err_t doorbell_notify_request_keyframe(const char *reason, const char *image_format);
 
+#if CONFIG_DOOR_ACCESS_CALL_FLOW
+/**
+ * @brief Notify the App that the device actively ended the two-way video
+ *        intercom (e.g. the local user hung up via touch/key).
+ *
+ * Indoor-display call-flow only. Sends the device-originated JSON-RPC notification
+ * "doorbell.notify.videoIntercomEnded" with params { reason }. Direction is
+ * device -> App and there is no id (the App does not reply). On receipt the App
+ * should update its call UI and stop sending/receiving the streams.
+ *
+ * @param reason  Trigger reason, e.g. "hangup" (local hang-up) or "deviceError".
+ * @return BK_OK on success.
+ */
+bk_err_t doorbell_notify_video_intercom_ended(const char *reason);
+#endif /* CONFIG_DOOR_ACCESS_CALL_FLOW */
+
 #ifdef __cplusplus
 }
 #endif

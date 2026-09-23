@@ -925,6 +925,12 @@ static void dl_fill_pip_cfg(doorbell_compositor_config_t *comp_cfg,
         dst_h = board->flexa.dst_height;
     }
     comp_cfg->pip_enable = (doorbell_devices_isp_handle_get() != NULL);
+#if CONFIG_DOOR_ACCESS_CALL_FLOW
+    /* Indoor-display call flow: show the decoded remote picture full-screen. The local
+     * camera frame is still encoded and uplinked to the App, it is just not
+     * blitted locally as a self-view PIP small window. */
+    comp_cfg->pip_enable = false;
+#endif
     if (defer_for_memory && comp_cfg->pip_enable &&
         dl_cfg != NULL && dl_cfg->height >= 720U &&
         doorbell_devices_uplink_active())

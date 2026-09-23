@@ -22,7 +22,17 @@ extern "C" {
 
 /* CP-side GPIO configuration is used ONLY for declaring GPIO pins that
  * require interrupts, and for configuring the UART0 pins. All other GPIO
- * pinmux/pull/level/etc. settings should be configured on the AP side. */
+ * pinmux/pull/level/etc. settings should be configured on the AP side.
+ *
+ * GPIO_6 is the capacitive TP INT pin, owned by AP drv_tp / LVGL. Do NOT add
+ * it to GPIO_DEFAULT_DEV_CONFIG: CONFIG_PM_ONLY_CP_ENABLE would then clear the
+ * IRQ in the CP ISR (s_gpio_isr[6] is NULL on CP) and AP would never see it.
+ * GPIO_IS_AP_OWNED_INTERRUPT tells the CP ISR to leave enable+pending alone
+ * instead of treating the edge as "spurious" and disabling the channel.
+ * Without this, the TP thread blocks forever on its semaphore and UI buttons
+ * never receive LVGL pointer events. */
+#define GPIO_IS_AP_OWNED_INTERRUPT(gpio_id)  ((gpio_id) == GPIO_6)
+
 #define GPIO_DEFAULT_DEV_CONFIG  \
 {\
 	{GPIO_8, GPIO_SECOND_FUNC_ENABLE, GPIO_DEV_GPIO_INPUT, GPIO_DEV_INVALID, GPIO_PULL_DISABLE, GPIO_INT_DISABLE, GPIO_INT_TYPE_FALLING_EDGE, GPIO_LOW_POWER_DISCARD_IO_STATUS, GPIO_DRIVER_CAPACITY_3, GPIO_INIT_ENABLE},\

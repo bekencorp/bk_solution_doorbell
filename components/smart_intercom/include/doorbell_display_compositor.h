@@ -110,6 +110,76 @@ bk_gpu_ctlr_handle_t doorbell_compositor_gpu_handle_get(void);
 /** @brief Whether the compositor pipeline is currently running. */
 bool doorbell_compositor_is_running(void);
 
+#if CONFIG_DOOR_ACCESS_CALL_FLOW
+/** Max sprites accepted by @ref doorbell_compositor_osd_show_n in one call. */
+#define DOORBELL_OSD_SPRITE_MAX  (4U)
+
+/** One ARGB8888 overlay sprite in panel coordinates. */
+typedef struct
+{
+    /** Stable element name, e.g. "lock". Identifies the sprite across calls so
+     * an unchanged sprite keeps the layer it is already composited into. */
+    const char *name;
+    const void *argb8888; /**< width * height * 4 bytes; copied into the engine */
+    uint16_t    width;
+    uint16_t    height;
+    uint16_t    dst_x;    /**< top-left X on the panel display surface */
+    uint16_t    dst_y;    /**< top-left Y on the panel display surface */
+    /** Set when the pixels behind @ref argb8888 were rewritten in place (the
+     * pointer alone cannot show that). A changed pointer or geometry is
+     * detected automatically. */
+    bool        dirty;
+} doorbell_osd_sprite_t;
+
+/**
+ * @brief Show a translucent OSD sprite (e.g. the hang-up button) on the composed
+ *        downlink picture via the GPU controller's shared overlay layer.
+ *
+ * Indoor-display call-flow only: implemented with the public bk_draw_osd controller bound to
+ * this compositor's GPU. Compiled out unless CONFIG_DOOR_ACCESS_CALL_FLOW
+ * (which also disables PIP, so the shared overlay is free).
+ *
+ * The ARGB8888 pixels are copied into an engine sprite, so the caller's
+ * @p argb8888 buffer may be freed on return. The sprite is alpha-blended onto
+ * every composed output frame until @ref doorbell_compositor_osd_hide (or the
+ * compositor stops). Calling again replaces the previous sprite.
+ *
+ * @param name      Stable element name (see @ref doorbell_osd_sprite_t).
+ * @param argb8888  Source ARGB8888 pixels (@p width * @p height * 4 bytes).
+ * @param width     Sprite width in pixels.
+ * @param height    Sprite height in pixels.
+ * @param dst_x     Top-left X on the panel display surface.
+ * @param dst_y     Top-left Y on the panel display surface.
+ * @param rotate    Sprite rotation onto the display (0/90/180/270).
+ * @return BK_OK on success; BK_ERR_STATE if the compositor is not running.
+ */
+bk_err_t doorbell_compositor_osd_show(const char *name, const void *argb8888,
+                                      uint16_t width, uint16_t height,
+                                      uint16_t dst_x, uint16_t dst_y, uint16_t rotate);
+
+/**
+ * @brief Show / refresh @p count OSD sprites in one shot (hang-up + lock + timer).
+ *
+ * @p sprites is the complete element set, so the same array is resubmitted on
+ * every refresh. Only the elements whose pixels or placement changed are
+ * re-composited; the others keep the overlay layer they are already blitted
+ * from, and a re-composited element is swapped at the next frame boundary. That
+ * is what keeps a once-a-second timer update from blinking the whole OSD: a full
+ * repaint would leave every layer unpainted for the frames composed while it
+ * runs.
+ *
+ * Nearby sprites may be clustered into one GPU overlay layer; distant sprites
+ * use separate layers. @p count is capped at @ref DOORBELL_OSD_SPRITE_MAX.
+ * Changing the element set (different names or count) rebuilds the OSD instance
+ * and does repaint everything, so keep the set stable across a call.
+ */
+bk_err_t doorbell_compositor_osd_show_n(const doorbell_osd_sprite_t *sprites, uint8_t count,
+                                        uint16_t rotate);
+
+/** @brief Remove the OSD sprite shown by @ref doorbell_compositor_osd_show. */
+bk_err_t doorbell_compositor_osd_hide(void);
+#endif /* CONFIG_DOOR_ACCESS_CALL_FLOW */
+
 /**
  * @brief HSRAM ping-pong strip size the compositor GPU needs (compressed flexa path).
  *
