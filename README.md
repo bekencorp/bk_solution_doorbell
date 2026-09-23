@@ -138,6 +138,7 @@ For the detailed flashing process, see [Armino SMP Quick Start](https://docs.bek
 | [doorbell_lp](../projects/doorbell_lp/) | Adds low-power keepalive after multimedia goes idle on top of doorbell. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell_lp/index.html) |
 | [doorbell_lp_QN128B832](../projects/doorbell_lp_QN128B832/) | BK7259QN128B832 (B-package) adaptation of doorbell_lp, with the same class of features. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell_lp_QN128B832/index.html) |
 | [video_intercom](../projects/video_intercom/) | Two-way video intercom: JSON-RPC control channel, LCD main view shows remote downlink video with a local PIP self-view, plus full-duplex audio. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/video_intercom/index.html) |
+| [intercom_indoor_display](../projects/intercom_indoor_display/) | Indoor intercom display: 720×1280 LVGL UI, invite/answer/hang-up call flow, unlock control, full-screen remote picture. | [Project README](../projects/intercom_indoor_display/README.md) |
 
 For the applicable scenarios and differences of each project, see the [example projects](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/index.html) page in the online documentation.
 

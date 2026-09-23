@@ -138,6 +138,7 @@ projects/doorbell/build/bk7259/doorbell/package/all-app.bin
 | [doorbell_lp](../projects/doorbell_lp/) | 在 doorbell 基础上增加多媒体空闲后的低功耗保活。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell_lp/index.html) |
 | [doorbell_lp_QN128B832](../projects/doorbell_lp_QN128B832/) | doorbell_lp 的 BK7259QN128B832（B 版封装）适配工程，功能与 doorbell_lp 同类。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell_lp_QN128B832/index.html) |
 | [video_intercom](../projects/video_intercom/) | 双向可视对讲：JSON-RPC 控制通道，LCD 主画面显示对端下行视频并叠加本机 PIP 自拍小窗，配合双向音频。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/video_intercom/index.html) |
+| [intercom_indoor_display](../projects/intercom_indoor_display/) | 室内对讲显示屏：720×1280 LVGL 界面、来电邀请/接听/挂断、开锁控制、对端全屏画面。 | [工程说明](../projects/intercom_indoor_display/README_CN.md) |
 
 各工程的适用场景与差异说明，请参阅在线文档的 [示例工程](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/index.html) 页面。
 
