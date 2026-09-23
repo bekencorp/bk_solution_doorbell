@@ -25,6 +25,9 @@
 #endif
 #include <lcd/lcd_mipi_hx8399c_1080x1920.h>
 #include <lcd/lcd_mipi_hx8394f_720x1280.h>
+#if CONFIG_VFS
+#include "bk_posix.h"   /* opendir/readdir/DIR/dirent for the `fs` command */
+#endif
 
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
 #define LOGW(...) BK_LOGW(TAG, ##__VA_ARGS__)
@@ -1291,8 +1294,40 @@ out:
 }
 #endif
 
+#if CONFIG_VFS
+/* Generic VFS directory listing - works on any mounted path (/sd0, /ud0, /if_0_0).
+ * U-disk bring-up (host power + keep-awake vote) is in smart_lock/doorbell_udisk.c. */
+void cli_avdk_mds_fs_cmd(char *pcWriteBuffer, int xWriteBufferLen, int argc, char **argv)
+{
+    if (argc >= 3 && os_strcmp(argv[1], "ls") == 0)
+    {
+        DIR *dir = opendir(argv[2]);
+        if (dir == NULL)
+        {
+            LOGI("[fs] opendir %s failed (mounted?)\r\n", argv[2]);
+            return;
+        }
+        int n = 0;
+        struct dirent *ent;
+        while ((ent = readdir(dir)) != NULL)
+        {
+            LOGI("  %s%s\r\n", ent->d_name, (ent->d_type == DT_DIR) ? "/" : "");
+            n++;
+        }
+        closedir(dir);
+        LOGI("[fs] %d entries in %s\r\n", n, argv[2]);
+        return;
+    }
+
+    LOGI("usage: fs ls <dir>   (e.g. fs ls /ud0, fs ls /sd0)\r\n");
+}
+#endif /* CONFIG_VFS */
+
 static const struct cli_command s_devices_cli_commands[] =
 {
+#if CONFIG_VFS
+    {"fs", "fs ls <dir>  (any mount: /sd0 /ud0 /if_0_0)", cli_avdk_mds_fs_cmd},
+#endif
     {"isp", "isp...", cli_avdk_mds_isp_cmd},
     {"display", "display...", cli_avdk_mds_display_cmd},
     {"joint_test", "joint_test open mipi [720p|1080p] [fps] [h264e] | open uvc [width height] [h264e] | test | close uvc|mipi", cli_avdk_mds_joint_test_cmd},

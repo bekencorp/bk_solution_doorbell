@@ -82,12 +82,16 @@ typedef enum
     MM_STATUS_CAMERA_BIT = 0,
     MM_STATUS_AUDIO_BIT = 1,
     MM_STATUS_LCD_BIT = 2,
-    MM_STATUS_ALL_BIT = 3,
+    MM_STATUS_UDISK_BIT = 3,   /* U-disk mounted => keep-awake, same as camera/audio/lcd */
+    MM_STATUS_ALL_BIT = 4,     /* sentinel: maps to MM_STATUS_ALL_MASK (clear-all) */
 } mm_status_bit_t;
 
 #define MM_STATUS_CAMERA_MASK (1U << MM_STATUS_CAMERA_BIT)
 #define MM_STATUS_AUDIO_MASK  (1U << MM_STATUS_AUDIO_BIT)
 #define MM_STATUS_LCD_MASK    (1U << MM_STATUS_LCD_BIT)
+#define MM_STATUS_UDISK_MASK  (1U << MM_STATUS_UDISK_BIT)
+/* UDISK intentionally excluded: ALL_MASK is the clear-all on phone disconnect;
+ * the U-disk is local and must only be released by an explicit `udisk umount`. */
 #define MM_STATUS_ALL_MASK (MM_STATUS_CAMERA_MASK | MM_STATUS_AUDIO_MASK | MM_STATUS_LCD_MASK)
 
 uint32_t doorbell_mm_service_vote(mm_status_bit_t service_bit, bool vote_add);

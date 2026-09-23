@@ -30,7 +30,8 @@ list(APPEND srcs
 list(APPEND priv_req bk_encoder bk_camera)
 endif()
 
-list(APPEND priv_req unity include avdk_utils avdk_driver bk_peripheral bk_encoder media_service bk_network_transfer bk_frame_buffer)
+# bk_vfs: `fs ls` in devices_cli.c uses bk_posix.h/bk_partition.h (must be unconditional).
+list(APPEND priv_req unity include avdk_utils avdk_driver bk_peripheral bk_encoder media_service bk_network_transfer bk_frame_buffer bk_vfs)
 
 armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" PRIV_REQUIRES "${priv_req}")
 
