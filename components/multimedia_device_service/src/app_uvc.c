@@ -483,10 +483,14 @@ static avdk_err_t uvc_camera_power_off(void)
     return AVDK_ERR_OK;
 }
 
+#define UVC_OPEN_RETRY_MAX       2     /* initial try + 1 retry (only on transient USB disconnect) */
+#define UVC_OPEN_RETRY_DELAY_MS  300   /* VBUS power-down settle before cold re-enumeration (enumeration itself is awaited by uvc_camera_power_on) */
+
 bk_uvc_ctlr_handle_t uvc_camera_turn_on(bk_cam_uvc_config_t *config)
 {
     avdk_err_t ret = AVDK_ERR_GENERIC;
     bk_uvc_ctlr_handle_t handle = NULL;
+    uint8_t retry_cnt = 0;
 
     bk_image_format_t format = config->format;
     config->format = BK_IMAGE_FORMAT_MJPEG;
@@ -506,6 +510,7 @@ bk_uvc_ctlr_handle_t uvc_camera_turn_on(bk_cam_uvc_config_t *config)
         }
     }
 
+open_uvc:
     // Power on the camera device and check have connected
     ret = uvc_camera_power_on(4000);
     if (ret != AVDK_ERR_OK)
@@ -556,8 +561,23 @@ bk_uvc_ctlr_handle_t uvc_camera_turn_on(bk_cam_uvc_config_t *config)
     ret = bk_uvc_open(handle, config);
     if (ret != AVDK_ERR_OK)
     {
-        LOGE("%s, %d: bk_uvc_open failed\n", __func__, __LINE__);
-        goto exit;
+        LOGE("%s, %d: bk_uvc_open failed, ret:%d\n", __func__, __LINE__, ret);
+        /* clean up this attempt */
+        bk_uvc_deinit(handle);
+        bk_uvc_delete(handle);
+        handle = NULL;
+        uvc_camera_power_off();
+        /* Only a transient USB disconnect (SET_INTERFACE dropped by DISCON/BABBLE) is retried:
+         * power-cycle to force a clean re-enumeration, then open once more. Other failures
+         * (e.g. unsupported resolution) fail fast without retry. */
+        if (ret == AVDK_ERR_SHUTDOWN && ++retry_cnt < UVC_OPEN_RETRY_MAX)
+        {
+            LOGW("%s: uvc open dropped by disconnect, retry %u/%u after %dms\n", __func__,
+                 retry_cnt, UVC_OPEN_RETRY_MAX - 1, UVC_OPEN_RETRY_DELAY_MS);
+            rtos_delay_milliseconds(UVC_OPEN_RETRY_DELAY_MS);
+            goto open_uvc;
+        }
+        return NULL;   /* already cleaned up, return directly without going through exit */
     }
 
     LOGD("%s open successful\n", __func__);
