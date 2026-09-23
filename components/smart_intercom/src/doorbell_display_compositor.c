@@ -55,6 +55,8 @@
  * broken PIP from ever starving the (higher-value) downlink decode/GPU path. */
 #define COMP_PIP_MAX_FAIL        30U
 #define COMP_PIP_FAIL_DELAY_MS   20U
+/* Dedicated blit slot so PIP clear does not wipe bk_draw_osd overlay layers. */
+#define COMP_PIP_BLIT_SLOT       0U
 /* Decouple the self-view (PIP) refresh from the downlink frame rate: if no
  * downlink main frame has been flushed for this long, the main picture is
  * frozen, so the PIP task actively recomposes (frozen main background + a fresh
@@ -82,6 +84,9 @@ typedef struct
     bk_gpu_ctlr_handle_t gpu;
     volatile uint8_t running;
     uint8_t gpu_open_deferred;
+    /* Product OSD registers once at boot; stop() must not clear gpu_event_cb. */
+    doorbell_compositor_gpu_event_cb_t gpu_event_cb;
+    uint8_t gpu_event_attached;
 
     uint16_t main_width;
     uint16_t main_height;
@@ -142,6 +147,32 @@ typedef struct
 } comp_ctx_t;
 
 static comp_ctx_t s_comp = {0};
+
+static void comp_notify_gpu_event(bool attached)
+{
+    if (s_comp.gpu_event_cb == NULL || s_comp.gpu == NULL)
+    {
+        return;
+    }
+    if (attached)
+    {
+        if (s_comp.gpu_event_attached != 0U)
+        {
+            return;
+        }
+        s_comp.gpu_event_attached = 1U;
+        s_comp.gpu_event_cb(s_comp.gpu, true);
+    }
+    else
+    {
+        if (s_comp.gpu_event_attached == 0U)
+        {
+            return;
+        }
+        s_comp.gpu_event_attached = 0U;
+        s_comp.gpu_event_cb(s_comp.gpu, false);
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /* GPU output frame pool                                              */
@@ -688,6 +719,7 @@ static void comp_pip_task_entry(void *arg)
             blit.dst_x = s_comp.pip_dst_x;
             blit.dst_y = s_comp.pip_dst_y;
             blit.rotate_degree = s_comp.pip_rotate;
+            blit.osd_slot = COMP_PIP_BLIT_SLOT;
             blit.args = NULL;
             blit.free = comp_pip_blit_free_cb;
 
@@ -780,7 +812,7 @@ static void comp_pip_stop(void)
     doorbell_isp_sp_close();
     if (s_comp.gpu != NULL)
     {
-        (void)bk_gpu_blit_clear(s_comp.gpu);
+        (void)bk_gpu_blit_clear_slot(s_comp.gpu, COMP_PIP_BLIT_SLOT);
     }
     comp_pip_pool_deinit();
 
@@ -969,6 +1001,7 @@ bk_err_t doorbell_compositor_start(const doorbell_compositor_config_t *cfg,
          (unsigned)cfg->main_width, (unsigned)cfg->main_height,
          (unsigned)dst_w, (unsigned)dst_h, (unsigned)degree,
          (unsigned)s_comp.pip_enable);
+    comp_notify_gpu_event(true);
     return BK_OK;
 
 fail_gpu:
@@ -1029,6 +1062,7 @@ bk_err_t doorbell_compositor_gpu_open(void)
     LOGI("compositor gpu open done: main=%ux%u pip=%u\n",
          (unsigned)s_comp.main_width, (unsigned)s_comp.main_height,
          (unsigned)s_comp.pip_enable);
+    comp_notify_gpu_event(true);
     return BK_OK;
 }
 
@@ -1137,6 +1171,9 @@ void doorbell_compositor_stop(void)
         s_comp.pip_enable = false;
     }
 
+    /* Product LCD OSD must drop bk_draw_osd before the GPU is closed. */
+    comp_notify_gpu_event(false);
+
 #if CONFIG_DOOR_ACCESS_CALL_FLOW
     /* Tear the OSD controller down while the GPU is still alive; bk_draw_osd_delete
      * releases the overlay layers it leased. */
@@ -1178,6 +1215,11 @@ void doorbell_compositor_stop(void)
 bk_gpu_ctlr_handle_t doorbell_compositor_gpu_handle_get(void)
 {
     return s_comp.gpu;
+}
+
+void doorbell_compositor_set_gpu_event_cb(doorbell_compositor_gpu_event_cb_t cb)
+{
+    s_comp.gpu_event_cb = cb;
 }
 
 bool doorbell_compositor_is_running(void)

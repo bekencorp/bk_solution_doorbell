@@ -110,6 +110,18 @@ bk_gpu_ctlr_handle_t doorbell_compositor_gpu_handle_get(void);
 /** @brief Whether the compositor pipeline is currently running. */
 bool doorbell_compositor_is_running(void);
 
+/**
+ * @brief GPU attach/detach callback for product LCD OSD (time / WiFi).
+ *
+ * @p attached true  after a successful @c bk_gpu_open (GPU is usable).
+ * @p attached false before @c bk_gpu_close, while the handle is still valid.
+ * Existing start/stop/PIP signatures are unchanged; this is additive.
+ */
+typedef void (*doorbell_compositor_gpu_event_cb_t)(bk_gpu_ctlr_handle_t gpu, bool attached);
+
+/** @brief Register (or clear with NULL) the GPU attach/detach callback. */
+void doorbell_compositor_set_gpu_event_cb(doorbell_compositor_gpu_event_cb_t cb);
+
 #if CONFIG_DOOR_ACCESS_CALL_FLOW
 /** Max sprites accepted by @ref doorbell_compositor_osd_show_n in one call. */
 #define DOORBELL_OSD_SPRITE_MAX  (4U)
