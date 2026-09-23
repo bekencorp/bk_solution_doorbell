@@ -31,6 +31,7 @@ typedef struct
 {
     uint8_t lcd_enable;
     uint8_t video_enable;
+    uint8_t video_stopping;
     uint8_t audio_enable;
     uint8_t lcd_id;
     uint16_t camera_id; // UVC_DEVICE_ID, MIPI_DEVICE_ID

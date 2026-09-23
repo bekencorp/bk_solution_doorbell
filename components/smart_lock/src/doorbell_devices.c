@@ -572,6 +572,12 @@ int doorbell_camera_turn_off(void)
         return ret;
     }
 
+    if (__atomic_test_and_set(&info->video_stopping, __ATOMIC_ACQUIRE))
+    {
+        LOGW("%s, camera is stopping\n", __func__);
+        return BK_OK;
+    }
+
     if (info->camera_id == UVC_DEVICE_ID)
     {
 #ifdef CONFIG_USB_CAMERA
@@ -586,19 +592,19 @@ int doorbell_camera_turn_off(void)
         if (ret != BK_OK)
         {
             LOGE("%s, app_uvc_turn_off failed, ret = %d\n", __func__, ret);
-            return ret;
+            goto out;
         }
         ret = app_h264_encode_close();
         if (ret != BK_OK)
         {
             LOGE("%s, h264_encode_close failed, ret = %d\n", __func__, ret);
-            return ret;
+            goto out;
         }
         ret = app_jpeg_decode_close();
         if (ret != BK_OK)
         {
             LOGE("%s, jpeg_decode_close failed, ret = %d\n", __func__, ret);
-            return ret;
+            goto out;
         }
         info->decode_handle = NULL;
         info->encode_handle = NULL;
@@ -619,7 +625,7 @@ int doorbell_camera_turn_off(void)
         {
             LOGE("%s, app_h264e_turn_off failed, ret = %d\n", __func__, ret);
             ret = BK_FAIL;
-            return ret;
+            goto out;
         }
 
 #ifdef CONFIG_MDS_SNAPSHOT
@@ -633,11 +639,13 @@ int doorbell_camera_turn_off(void)
     {
         LOGE("%s, camera turn off failed, ret = %d\n", __func__, ret);
         ret = BK_FAIL;
-        return ret;
+        goto out;
     }
     info->video_enable = false;
     LOGD("%s success\n", __func__);
 
+out:
+    __atomic_clear(&info->video_stopping, __ATOMIC_RELEASE);
     return ret;
 }
 
