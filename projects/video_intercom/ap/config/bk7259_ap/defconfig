@@ -219,3 +219,9 @@ CONFIG_ADC_KEY2_ADC_CHAN=1
 CONFIG_ADC_KEY_LONG_PRESS_MS=3000
 
 CONFIG_BK_FACTORY_CONFIG=y
+
+# LCD OSD wall clock. NTP writes local time (UTC+8) into AON RTC after STA
+# is up; bk_init already starts app_time_rtc_ntp_sync_init() when this is y.
+CONFIG_AON_RTC=y
+CONFIG_NTP_SYNC_RTC=y
+CONFIG_RTC_NTP_TIMEZONE=8

@@ -1,6 +1,6 @@
-set(incs .)
+set(incs . osd)
 
-set(srcs ap_main.c key_map.c ui/doorbell_ui.c )
+set(srcs ap_main.c key_map.c ui/doorbell_ui.c osd/lcd_osd.c osd/lcd_osd_blend_dsc.c osd/resources/lcd_osd_font.c osd/resources/lcd_osd_wifi.c )
 
 if (CONFIG_AUD_PARAM_CTRL)
     list(APPEND incs ./audio_param)
@@ -36,6 +36,7 @@ set(priv_req
     lvgl
     bk_key
     bk_factory_config
+    bk_draw_osd
 )
 
 armino_component_register(SRCS "${srcs}" INCLUDE_DIRS "${incs}" PRIV_REQUIRES "${priv_req}")

@@ -23,6 +23,7 @@
 #include "doorbell_ipc_msg.h"
 #include "doorbell_keepalive.h"
 #include "ui/doorbell_ui.h"
+#include "osd/lcd_osd.h"
 #include "doorbell_netcfg.h"
 #include "components/bluetooth/bk_dm_bluetooth.h"
 #include "key_map.h"
@@ -223,6 +224,7 @@ int main(void)
      * started here; it comes up once boot media finishes (see
      * video_intercom_boot_media_done -> doorbell_ui_on_boot_media_done). */
     doorbell_ui_init();
+    lcd_osd_init();
 
     /* Provide the firmware version carried in the BLE provisioning advertisement
      * BEFORE provisioning starts in doorbell_core_init(). The device type
