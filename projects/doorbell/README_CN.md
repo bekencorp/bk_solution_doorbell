@@ -19,8 +19,10 @@
 | 语音 | ADK + AEC v3 + G.711/G.722，板载 Mic/Speaker，UVC UAC |
 | ASR | KWS + TFLite-Micro + NPU |
 | 快照 | SD 卡 JPEG 抓拍（`CONFIG_MDS_SNAPSHOT`） |
+| U盘 | USB MSC Host，按需挂载到 `/ud0`（`CONFIG_USBH_MSC`） |
 
 默认板级配置见 `ap/ap_main.c`，完整 Kconfig 见 `ap/config/bk7259_ap/defconfig`。
+
 
 ## 3 编译
 
@@ -57,6 +59,17 @@ projects/doorbell/build/bk7259/doorbell/package/all-app.bin
 7. 板载 LCD 与音频通过 APK 上的按钮控制开关。
 
 使用前请确认 MIPI 摄像头、MIPI LCD、Speaker、Mic 已正确接入开发板；若使用 UVC 摄像头，需接入 USB 接口。doorbell 工程不支持 DVP 摄像头。
+
+### 4.1 U盘 CLI
+
+```text
+ap_cmd udisk mount          # USB Host 上电，等待枚举，挂载到 /ud0
+ap_cmd udisk umount         # 卸载 /ud0，USB Host 下电
+ap_cmd udisk test           # 挂载后写 16KB 并读回逐字节校验，删除测试文件后卸载
+ap_cmd fs ls <dir>          # 列目录，适用于任意已挂载路径（/ud0、/sd0、/if_0_0）
+```
+
+USB Host 默认不常开，需用上述命令按需挂载。BK7259 只有一个 USB 控制器，U盘与 UVC 摄像头共用，需同时在线请接 USB HUB。
 
 ## 5 工程目录
 

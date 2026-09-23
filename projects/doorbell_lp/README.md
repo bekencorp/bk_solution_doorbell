@@ -16,6 +16,7 @@ Multimedia capabilities match `doorbell`, including camera, LCD, audio, streamin
 | Low-power keepalive | Enters keepalive after camera, audio, LCD, and other multimedia services are turned off |
 | Fast recovery | Restores doorbell and multimedia services after a wake request |
 | Keepalive CLI | Configures idle detection interval for debug and demos |
+| U-disk | USB MSC host, mounted on demand at `/ud0`; blocks keepalive while mounted |
 
 ### 2.1 vs doorbell
 
@@ -55,6 +56,17 @@ ka                          # show help
 ka interval <ms>            # idle check interval (3000-300000 ms, persisted to Flash)
 ```
 
+### 3.5 U-disk CLI
+
+```text
+ap_cmd udisk mount          # power the USB host, wait for enumeration, mount at /ud0
+ap_cmd udisk umount         # unmount /ud0 and power the USB host down
+ap_cmd udisk test           # mount, write 16KB and read it back byte-by-byte, delete the file, unmount
+ap_cmd fs ls <dir>          # list a directory on any mounted path (/ud0, /sd0, /if_0_0)
+```
+
+A mounted U-disk holds the multimedia busy state, so the device stays out of keepalive until it is unmounted. BK7259 has a single USB controller shared by the U-disk and the UVC camera; use a USB hub if both must be online.
+
 ## 4 Layout
 
 ```text
@@ -88,3 +100,7 @@ A: It is not recommended. Wake the device first, then follow the normal doorbell
 **Q: What does the idle check interval control?**
 
 A: It controls how long the project waits after multimedia services are turned off before entering keepalive. It can be adjusted through the CLI.
+
+**Q: Why does the device stay awake after I mount a U-disk?**
+
+A: A mounted U-disk holds the multimedia busy state (`MM_STATUS_UDISK`), so the idle countdown never starts - this keeps the AP from being powered off with the disk mounted. Run `ap_cmd udisk umount` to release it and keepalive resumes.

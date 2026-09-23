@@ -19,6 +19,7 @@ This project runs on the BK7259 SMP dual-core platform and provides full video d
 | Audio | ADK + AEC v3 + G.711/G.722, on-board Mic/Speaker, UVC UAC |
 | ASR | KWS + TFLite-Micro + NPU |
 | Snapshot | SD-card JPEG snapshot (`CONFIG_MDS_SNAPSHOT`) |
+| U-disk | USB MSC host, mounted on demand at `/ud0` (`CONFIG_USBH_MSC`) |
 
 Default board config: `ap/ap_main.c`. Full Kconfig: `ap/config/bk7259_ap/defconfig`.
 
@@ -56,6 +57,17 @@ Flash this bin to BK7259v2.
 7. Toggle on-board LCD and audio from APK buttons
 
 Connect the MIPI camera, MIPI LCD, speaker, and mic before testing. Plug the UVC camera into USB if used. The doorbell project does not support DVP cameras.
+
+### 4.1 U-disk CLI
+
+```text
+ap_cmd udisk mount          # power the USB host, wait for enumeration, mount at /ud0
+ap_cmd udisk umount         # unmount /ud0 and power the USB host down
+ap_cmd udisk test           # mount, write 16KB and read it back byte-by-byte, delete the file, unmount
+ap_cmd fs ls <dir>          # list a directory on any mounted path (/ud0, /sd0, /if_0_0)
+```
+
+The USB host is not kept on by default, so mount on demand with the commands above. BK7259 has a single USB controller shared by the U-disk and the UVC camera; use a USB hub if both must be online.
 
 ## 5 Layout
 
