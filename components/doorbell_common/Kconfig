@@ -11,6 +11,15 @@ menu "Doorbell Common"
             Builds doorbell camera/media with kvs_service transport. Enable CONFIG_KVS_NTWK_BRIDGE
             and KVS/AWS options in the project defconfig.
 
+    config DOORBELL_MULTI_SESSION
+        bool "CS2 multi-phone multimedia session"
+        depends on INTEGRATION_DOORBELL && CS2_P2P_SERVER
+        default n
+        help
+            Allow multiple phones to watch and control camera/audio/LCD independently.
+            Each phone uses one CS2 PPCS session. Enable this only on the
+            doorbell_multi_session project; the original doorbell stays single-client.
+
     config DOORBELL_KEEPALIVE_ALWAYS_ON
         bool "Doorbell keep network service always online"
         default n

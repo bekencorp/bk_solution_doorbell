@@ -11,4 +11,11 @@ menu "Doorbell Service"
         help
             Build snapshot capture into multimedia_device_service.
             Enable this option when snapshot CLI / doorbell capture is needed.
+
+    config MDS_ENCODED_QUE_LEN
+        int "Encoded image queue length (free/ready)"
+        default 8
+        range 3 16
+        help
+            Depth of the encoded image free/ready queues in mds_img_manager.
 endmenu

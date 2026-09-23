@@ -21,6 +21,9 @@
 #include "doorbell_devices.h"
 #include "doorbell_audio_device.h"
 #include "doorbell_cmd.h"
+#if CONFIG_DOORBELL_MULTI_SESSION
+#include "doorbell_multi_session_mgr.h"
+#endif
 #include "app_display.h"
 
 #include "network_transfer.h"
@@ -70,6 +73,28 @@ void doorbell_transmission_event_report(uint32_t opcode, uint8_t status, uint16_
 
     ntwk_trans_ctrl_send((uint8_t *)&evt, sizeof(db_evt_head_t));
 }
+
+#if CONFIG_DOORBELL_MULTI_SESSION
+void doorbell_transmission_event_report_to_session(ntwk_session_id_t sid, uint32_t opcode, uint8_t status, uint16_t flags)
+{
+    LOGD("%s, sid:%d opcode:%d\n", __func__, sid, opcode);
+
+    db_evt_head_t evt;
+    evt.opcode = CHECK_ENDIAN_UINT16(opcode);
+    evt.status = status;
+    evt.length = CHECK_ENDIAN_UINT16(0);
+    evt.flags = flags;
+
+    if (sid != NTWK_INVALID_SESSION_ID)
+    {
+        ntwk_trans_ctrl_send_to(sid, (uint8_t *)&evt, sizeof(db_evt_head_t));
+    }
+    else
+    {
+        ntwk_trans_ctrl_send((uint8_t *)&evt, sizeof(db_evt_head_t));
+    }
+}
+#endif
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
 void doorbell_transmission_device_power_on_notify(void)
@@ -204,6 +229,13 @@ bk_err_t doorbell_cmd_server_deinit(void)
 
 void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 {
+#if CONFIG_DOORBELL_MULTI_SESSION
+    doorbell_transmission_cmd_receive_from_session(NTWK_INVALID_SESSION_ID, data, length);
+}
+
+void doorbell_transmission_cmd_receive_from_session(ntwk_session_id_t sid, uint8_t *data, uint16_t length)
+{
+#endif
     db_cmd_head_t cmd, *ptr = (db_cmd_head_t *)data;
     uint8_t *p = ptr->payload;
 
@@ -253,7 +285,18 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
                 LOGE("DBCMD_SET_SERVICE_TYPE error\n");
             }
 
+#if CONFIG_DOORBELL_MULTI_SESSION
+            if (sid != NTWK_INVALID_SESSION_ID)
+            {
+                ntwk_trans_ctrl_send_to(sid, (uint8_t *)&evt, sizeof(db_evt_head_t));
+            }
+            else
+            {
+                ntwk_trans_ctrl_send((uint8_t *)&evt, sizeof(db_evt_head_t));
+            }
+#else
             ntwk_trans_ctrl_send((uint8_t *)&evt, sizeof(db_evt_head_t));
+#endif
         }
         break;
 
@@ -272,7 +315,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
                 doorbell_cmd_server_deinit();
             }
 
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
 
@@ -323,6 +370,16 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             doorbell_asr_turn_off();
 #endif
 
+#if CONFIG_DOORBELL_MULTI_SESSION
+            int ret = doorbell_multi_session_camera_on(sid, &parameters);
+            #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+            if (ret != BK_OK && !camera_vote_was_set)
+            {
+                doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, false);
+            }
+            #endif
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#else
             int cam_ret = doorbell_camera_turn_on(&parameters);
             if (cam_ret != BK_OK)
             {
@@ -349,13 +406,18 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
                 doorbell_mm_service_vote(MM_STATUS_CAMERA_BIT, false);
             }
             #endif
+#endif
         }
         break;
 
         case DBCMD_SET_CAMERA_TURN_OFF:
         {
+#if CONFIG_DOORBELL_MULTI_SESSION
+            int ret = doorbell_multi_session_camera_off(sid);
+#else
             doorbell_video_transfer_turn_off();
             int ret = doorbell_camera_turn_off();
+#endif
             if (ret != BK_OK)
             {
                 LOGE("doorbell_camera_turn_off failed\n");
@@ -368,7 +430,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             }
             #endif
 
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
 
@@ -398,7 +464,13 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 #if (CONFIG_ASR_SERVICE_WITH_MIC)
             doorbell_asr_turn_off();
 #endif
+#if CONFIG_DOORBELL_MULTI_SESSION
+            bool owner = false;
+            int ret = doorbell_multi_session_audio_on(sid, &parameters, &owner);
+            (void)owner;
+#else
             int ret = doorbell_audio_turn_on(&parameters);
+#endif
 #else
             int ret = BK_FAIL;
 #endif
@@ -409,7 +481,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             }
             #endif
 
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
 
@@ -417,7 +493,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
         {
             LOGD("DBCMD_SET_AUDIO_TURN_OFF\n");
 #ifdef CONFIG_VOICE_SERVICE
+#if CONFIG_DOORBELL_MULTI_SESSION
+            int ret = doorbell_multi_session_audio_off(sid);
+#else
             int ret = doorbell_audio_turn_off();
+#endif
 #else
             int ret = BK_FAIL;
 #endif
@@ -428,7 +508,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             }
             #endif
 
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
 
@@ -450,7 +534,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
             //STREAM_TO_UINT16(parameters.rotate_angle, p);
             //STREAM_TO_UINT16(parameters.pixel_format, p);
 
+#if CONFIG_DOORBELL_MULTI_SESSION
+            int ret = doorbell_multi_session_lcd_on(sid);
+#else
             int ret = doorbell_display_turn_on(app_display_board_config_get());
+#endif
             if (ret != BK_OK)
             {
                 LOGE("doorbell_display_turn_on failed\n");
@@ -461,13 +549,21 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
                 doorbell_mm_service_vote(MM_STATUS_LCD_BIT, false);
             }
             #endif
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
 
         case DBCMD_SET_LCD_TURN_OFF:
         {
+#if CONFIG_DOORBELL_MULTI_SESSION
+            int ret = doorbell_multi_session_lcd_off(sid);
+#else
             int ret = doorbell_display_turn_off();
+#endif
             if (ret != BK_OK)
             {
                 LOGE("doorbell_display_turn_off failed\n");
@@ -478,7 +574,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
                 doorbell_mm_service_vote(MM_STATUS_LCD_BIT, false);
             }
             #endif
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
 
@@ -497,7 +597,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 
         case DBCMD_PNG:
         {
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
 
@@ -511,14 +615,22 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 #else
             int ret = BK_FAIL;
 #endif
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, ret & 0xFF, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
         case DBCMD_WAKE_UP_REQUEST:
         {
             LOGD("DBCMD_WAKE_UP_REQUEST\n");
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_OK, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
         case DBCMD_DEVICE_POWER_ON_NOTIFY:
@@ -530,7 +642,11 @@ void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length)
 #endif
         default:
         {
+#if CONFIG_DOORBELL_MULTI_SESSION
+            doorbell_transmission_event_report_to_session(sid, cmd.opcode, EVT_STATUS_UNKNOWN, EVT_FLAGS_COMPLETE);
+#else
             doorbell_transmission_event_report(cmd.opcode, EVT_STATUS_UNKNOWN, EVT_FLAGS_COMPLETE);
+#endif
         }
         break;
     }

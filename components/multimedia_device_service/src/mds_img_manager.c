@@ -19,6 +19,7 @@
 #if CONFIG_NTWK_H264_DROP_POLICY
 #include "h264_backpressure_drop.h"
 #endif
+#include "cs2_congestion_drop.h"
 
 #define TAG "code_img"
 
@@ -27,7 +28,12 @@
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
 #define LOGD(...) BK_LOGD(TAG, ##__VA_ARGS__)
 
-#define MAX_QUE_LEN (8)//5 is too small, 10 is enough
+//#define MAX_QUE_LEN (8)//5 is too small, 10 is enough
+#ifndef CONFIG_MDS_ENCODED_QUE_LEN
+#define CONFIG_MDS_ENCODED_QUE_LEN (8)
+#endif
+#define MAX_QUE_LEN (CONFIG_MDS_ENCODED_QUE_LEN)
+
 #ifndef CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER
 #define CONFIG_BK_ENCODER_H264_MAX_OUTPUT_BUFFER (1024 * 200)
 #endif
@@ -127,6 +133,9 @@ bk_err_t bk_encoded_data_manager_init(void)
         #if CONFIG_NTWK_H264_DROP_POLICY
         img_service->h264_available_buffer_count = 0;
         ntwk_h264_backpressure_drop_init(MAX_QUE_LEN);
+        #endif
+        #if CONFIG_NTWK_CS2_CONGESTION_DROP
+        ntwk_cs2_congestion_drop_init();
         #endif
 
         for (int i = 0 ; i < MAX_QUE_LEN; i ++)
@@ -290,6 +299,9 @@ bk_err_t bk_encoded_data_manager_deinit(uint8_t input)
         }
     }
 
+    #if CONFIG_NTWK_CS2_CONGESTION_DROP
+    ntwk_cs2_congestion_drop_reset();
+    #endif
     #if CONFIG_NTWK_H264_DROP_POLICY
     ntwk_h264_backpressure_drop_reset();
     #endif
@@ -351,6 +363,32 @@ bk_err_t bk_encoded_data_complete_request(uint8_t *frame)
     if (img_service && img_service->ready_queue)
     {
         msg.param = (uint32_t)frame;
+
+#if CONFIG_NTWK_CS2_CONGESTION_DROP
+        /* Pre-dispatch drop based on CS2 per-session TX backlog (multi-session jitter handling). */
+        if (ntwk_cs2_congestion_drop_check(frame))
+        {
+            if (img_service->free_queue == NULL)
+            {
+                LOGW("%s, %d cs2 congest drop without free queue\n", __func__, __LINE__);
+                return BK_FAIL;
+            }
+
+            ret = rtos_push_to_queue(&img_service->free_queue, &msg, BEKEN_NO_WAIT);
+            if (ret == BK_OK)
+            {
+                #if CONFIG_NTWK_H264_DROP_POLICY
+                bk_encoded_data_count_inc(&img_service->h264_available_buffer_count);
+                #endif
+            }
+            else
+            {
+                LOGW("%s, %d cs2 congest drop push free queue fail\n", __func__, __LINE__);
+            }
+
+            return ret;
+        }
+#endif
 
 #if CONFIG_NTWK_H264_DROP_POLICY
         available_buffer_count = bk_encoded_data_count_get(&img_service->h264_available_buffer_count);

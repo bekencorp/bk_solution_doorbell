@@ -15,6 +15,10 @@
 #if CONFIG_NTWK_H264_DROP_POLICY
 #include "h264_backpressure_drop.h"
 #endif
+#include "cs2_congestion_drop.h"
+#if (CONFIG_CS2_P2P_SERVER || CONFIG_CS2_P2P_CLIENT) && !CONFIG_NTWK_CS2_CONGESTION_DROP
+extern bool ntwk_cs2_consume_force_idr(void);
+#endif
 
 #define TAG "pipeline_test"
 
@@ -99,6 +103,15 @@ static uint32_t app_h264_encode_out_buffer_complete_cb(bk_h264_encode_outbuf_inf
         bk_encoded_data_complete_request((uint8_t *)buffer);
 #if CONFIG_NTWK_H264_DROP_POLICY
         if (ntwk_h264_backpressure_drop_consume_force_idr()) {
+            bk_h264_encode_force_idr(ctx->enc_ctlr_handle);
+        }
+#endif
+#if CONFIG_NTWK_CS2_CONGESTION_DROP
+        if (ntwk_cs2_congestion_consume_force_idr()) {
+            bk_h264_encode_force_idr(ctx->enc_ctlr_handle);
+        }
+#elif CONFIG_CS2_P2P_SERVER || CONFIG_CS2_P2P_CLIENT
+        if (ntwk_cs2_consume_force_idr()) {
             bk_h264_encode_force_idr(ctx->enc_ctlr_handle);
         }
 #endif

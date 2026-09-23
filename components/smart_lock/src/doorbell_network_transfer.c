@@ -8,6 +8,9 @@
 #include "doorbell_audio_device.h"
 #include "doorbell_comm.h"
 #include "doorbell_network.h"
+#if CONFIG_DOORBELL_MULTI_SESSION
+#include "doorbell_multi_session_mgr.h"
+#endif
 
 #define TAG "db-ntwk"
 
@@ -77,6 +80,28 @@ bk_err_t doorbell_bk_net_cntrl_recv(uint8_t *data, uint32_t length)
     return BK_OK;
 }
 
+#if CONFIG_DOORBELL_MULTI_SESSION
+bk_err_t doorbell_bk_net_session_recv(ntwk_session_id_t sid, chan_type_t chan, uint8_t *data, uint32_t length)
+{
+    LOGI("%s: sid=%d chan=%d length=%d\n", __func__, sid, chan, length);
+
+    if (chan != NTWK_TRANS_CHAN_CTRL)
+    {
+        return BK_FAIL;
+    }
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    if (!check_all_channels_connected())
+    {
+        LOGW("%s: network transfer is not ready, reject control command\n", __func__);
+        return BK_FAIL;
+    }
+#endif
+    doorbell_transmission_cmd_receive_from_session(sid, data, length);
+    return BK_OK;
+}
+#endif
+
 bk_err_t doorbell_bk_net_video_recv(uint8_t *data, uint32_t length)
 {
     /* TODO: Implement video receive callback */
@@ -142,6 +167,14 @@ static dbevt_t handle_start_event(db_ntwk_type_t ntwk_type, chan_type_t chan_typ
 
 static dbevt_t handle_connected_event(db_ntwk_type_t ntwk_type, chan_type_t chan_type, int param)
 {
+#if CONFIG_DOORBELL_MULTI_SESSION
+    if (ntwk_type == DB_NTWK_TYPE_CS2 && chan_type == NTWK_TRANS_CHAN_CTRL)
+    {
+        doorbell_multi_session_on_connect((ntwk_session_id_t)param);
+        return 0;
+    }
+#endif
+
     switch (chan_type)
     {
         case NTWK_TRANS_CHAN_CTRL:
@@ -205,6 +238,14 @@ static dbevt_t handle_connected_event(db_ntwk_type_t ntwk_type, chan_type_t chan
 
 static dbevt_t handle_disconnected_event(db_ntwk_type_t ntwk_type, chan_type_t chan_type, int param)
 {
+#if CONFIG_DOORBELL_MULTI_SESSION
+    if (ntwk_type == DB_NTWK_TYPE_CS2 && chan_type == NTWK_TRANS_CHAN_CTRL)
+    {
+        doorbell_multi_session_on_disconnect((ntwk_session_id_t)param);
+        return 0;
+    }
+#endif
+
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
     clear_chan_connected(chan_type);
 #endif
@@ -372,6 +413,9 @@ static bk_err_t doorbell_network_transfer_start(char *service_name, void *param)
 
     //configure ctrl channel
     ntwk_trans_register_ctrl_recv_cb(doorbell_bk_net_cntrl_recv);
+#if CONFIG_DOORBELL_MULTI_SESSION
+    ntwk_trans_register_session_recv_cb(doorbell_bk_net_session_recv);
+#endif
     // For cs2_service, pass param; for tcp_service and udp_service, pass NULL
     ctrl_param = (strcmp(service_name, "cs2_service") == 0) ? param : NULL;
     ntwk_trans_chan_start(NTWK_TRANS_CHAN_CTRL, ctrl_param);

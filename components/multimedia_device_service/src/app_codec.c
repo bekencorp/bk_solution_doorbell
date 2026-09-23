@@ -19,6 +19,10 @@
 #if CONFIG_NTWK_H264_DROP_POLICY
 #include "h264_backpressure_drop.h"
 #endif
+#include "cs2_congestion_drop.h"
+#if (CONFIG_CS2_P2P_SERVER || CONFIG_CS2_P2P_CLIENT) && !CONFIG_NTWK_CS2_CONGESTION_DROP
+extern bool ntwk_cs2_consume_force_idr(void);
+#endif
 
 #define TAG "db-codec"
 
@@ -162,6 +166,15 @@ uint32_t encoder_buffer_complete(bk_h264_encode_outbuf_info_t *info)
         bk_encoded_data_complete_request((uint8_t *)buffer);
 #if CONFIG_NTWK_H264_DROP_POLICY
         if (ntwk_h264_backpressure_drop_consume_force_idr() && app_codec_enc_handler != NULL) {
+            bk_h264_encode_force_idr(app_codec_enc_handler);
+        }
+#endif
+#if CONFIG_NTWK_CS2_CONGESTION_DROP
+        if (ntwk_cs2_congestion_consume_force_idr() && app_codec_enc_handler != NULL) {
+            bk_h264_encode_force_idr(app_codec_enc_handler);
+        }
+#elif CONFIG_CS2_P2P_SERVER || CONFIG_CS2_P2P_CLIENT
+        if (ntwk_cs2_consume_force_idr() && app_codec_enc_handler != NULL) {
             bk_h264_encode_force_idr(app_codec_enc_handler);
         }
 #endif

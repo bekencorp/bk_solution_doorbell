@@ -73,6 +73,10 @@ typedef enum
 } dbcmd_t;
 
 void doorbell_transmission_cmd_recive_callback(uint8_t *data, uint16_t length);
+#if CONFIG_DOORBELL_MULTI_SESSION
+void doorbell_transmission_cmd_receive_from_session(ntwk_session_id_t sid, uint8_t *data, uint16_t length);
+void doorbell_transmission_event_report_to_session(ntwk_session_id_t sid, uint32_t opcode, uint8_t status, uint16_t flags);
+#endif
 
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
 void doorbell_transmission_device_power_on_notify(void);

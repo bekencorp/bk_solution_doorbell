@@ -17,6 +17,11 @@ elseif (CONFIG_INTEGRATION_DOORBELL)
 		src/doorbell_udisk.c   # U-disk CLI + MM_STATUS_UDISK vote (body gated by CONFIG_USBH_MSC)
 		src/bk_smart_config.c
 	)
+	if (CONFIG_DOORBELL_MULTI_SESSION)
+		list(APPEND srcs
+			src/doorbell_multi_session_mgr.c
+		)
+	endif()
 endif()
 
 if (CONFIG_INTEGRATION_DOORBELL AND CONFIG_NTWK_CLIENT_SERVICE_ENABLE)
