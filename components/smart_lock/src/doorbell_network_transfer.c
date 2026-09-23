@@ -398,9 +398,7 @@ bk_err_t doorbell_network_transfer_stop(void)
     reset_chan_stopped_mask();
 #endif
 
-    ntwk_trans_chan_stop(NTWK_TRANS_CHAN_CTRL);
-    ntwk_trans_chan_stop(NTWK_TRANS_CHAN_VIDEO);
-    ntwk_trans_chan_stop(NTWK_TRANS_CHAN_AUDIO);
+    ntwk_trans_chan_stop_all();
 
     LOGI("%s end\n", __func__);
 
