@@ -730,6 +730,22 @@ kbd, .kbd {
     margin-right: 0;
 }
 
+/* 快速入门：副标题进页默认展开，点标题或三角可收起 */
+.wy-menu-vertical li.toctree-l2.has-toc-children:not(.toc-open) > ul {
+    display: none;
+}
+
+.wy-menu-vertical li.toctree-l2.has-toc-children.toc-open > ul {
+    display: block;
+}
+
+/* l2 未标 current 时主题不给 l3 加 padding，侧栏 H3 会和 H2 看起来同级 */
+.wy-menu-vertical li.toctree-l2 li.toctree-l3 > a,
+.wy-menu-vertical li.current li.toctree-l3 > a {
+    padding: .4045em 1.618em .4045em 4.045em;
+    color: var(--navbar-level-3-color);
+}
+
 /* Banner panel in sidebar */
 .wy-nav-side .ethical-rtd.fixed {
     position: fixed;

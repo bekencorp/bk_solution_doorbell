@@ -169,7 +169,7 @@ print('Version: {0}  Release: {1}'.format(version, release))
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ['_build','README.md']
+exclude_patterns = ['_build', 'README.md', '_readme_body.rst']
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.

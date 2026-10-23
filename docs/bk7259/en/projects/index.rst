@@ -1,10 +1,14 @@
-Example Projects
+Reference Projects
 ===========================
 
 :link_to_translation:`zh_CN:[中文]`
 
 .. toctree::
     :maxdepth: 1
-    :glob:
 
-    */index
+    doorbell/index
+    doorbell_lp/index
+    doorbell_lp_QN128B832/index
+    doorbell_multi_session/index
+    intercom_indoor_display/index
+    video_intercom/index
