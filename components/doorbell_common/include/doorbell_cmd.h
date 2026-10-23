@@ -81,6 +81,19 @@ void doorbell_transmission_event_report_to_session(ntwk_session_id_t sid, uint32
 #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
 void doorbell_transmission_device_power_on_notify(void);
 
+/* Stop the periodic heartbeat. Safe to call when it was never started or is
+ * already stopped. Both doorbell_cmd.c variants (smart_intercom, smart_lock)
+ * implement this. */
+int doorbell_keep_alive_stop_timer(void);
+
+#if CONFIG_SMART_INTERCOM
+/* Transmit one heartbeat, from the calling thread. Only doorbell_core's message
+ * thread should call this: the send blocks, and the keepalive timer callback
+ * runs on the shared FreeRTOS timer service task where blocking is fatal to
+ * every other software timer in the system. */
+void doorbell_keep_alive_send_now(void);
+#endif
+
 typedef enum
 {
     MM_STATUS_CAMERA_BIT = 0,

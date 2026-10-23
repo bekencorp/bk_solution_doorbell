@@ -96,13 +96,19 @@ bk_err_t doorbell_rpc_audio_turn_on(cJSON *params, cJSON *id)
     {
         doorbell_mm_service_vote(MM_STATUS_AUDIO_BIT, false);
     }
-#endif
 
+    if (ret != BK_OK && !audio_vote_was_set)
+    {
+        return doorbell_rpc_send_error(id, DB_RPC_ERR_INTERNAL, "audio turn on failed", NULL);
+    }
+    return doorbell_rpc_send_result_null(id);
+#else
     if (ret != BK_OK)
     {
         return doorbell_rpc_send_error(id, DB_RPC_ERR_INTERNAL, "audio turn on failed", NULL);
     }
     return doorbell_rpc_send_result_null(id);
+#endif
 #else
     (void)params;
     return doorbell_rpc_send_error(id, DB_RPC_ERR_NOT_SUPPORT, "voice service disabled", NULL);

@@ -269,6 +269,16 @@ static void doorbell_message_handle(void *param)
 
                 case DBEVT_REMOTE_DEVICE_DISCONNECTED:
                 {
+                    #if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+                    /* Before the skip guard, and on every channel's disconnect:
+                     * the session is over either way and nothing else ever
+                     * stopped this timer. Left running it kept firing every 30s
+                     * into an already deinitialised transport - a field capture
+                     * shows "ntwk_trans_ctrl_send, context not initialized"
+                     * repeating to the end of the log with no way back. */
+                    doorbell_keep_alive_stop_timer();
+                    #endif
+
                     if ((db_info->service == DOORBELL_SERVICE_NONE) || (db_info->stopping == BK_TRUE))
                     {
                         LOGD("DBEVT_REMOTE_DEVICE_DISCONNECTED is stopping, skip\r\n");
@@ -419,6 +429,19 @@ static void doorbell_message_handle(void *param)
                 {
                     LOGD("DBEVT_LAN_UDP_SERVICE_STOP_RESPONSE\n");
                     doorbell_keepalive_send_keepalive();
+                }
+                break;
+
+                case DBEVT_SEND_HEARTBEAT:
+                {
+#if CONFIG_SMART_INTERCOM
+                    /* Runs here rather than in the keepalive timer callback so
+                     * a blocking control-channel send cannot stall the shared
+                     * FreeRTOS timer service task. Bounded by SO_SNDTIMEO and
+                     * the ctrl retry budget, so the worst case is ~1s of delay
+                     * to whatever event is queued behind it. */
+                    doorbell_keep_alive_send_now();
+#endif
                 }
                 break;
 #endif

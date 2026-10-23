@@ -160,7 +160,12 @@ static cJSON *p_image_set_recv_config(void)
      * Requesting 30fps; verify the real decode+GPU+DPU pipeline sustains it
      * (previously measured ~40ms/frame -> ~24fps; recheck after optimization). */
     cJSON_AddNumberToObject(h264, "fps", 30);
-    cJSON_AddNumberToObject(h264, "pFrameCount", 29);
+    /* GOP = 40 (1 I + 39 P). The device never reads the value back - it only
+     * tells the App's encoder how often to emit an I frame. A 1s GOP cost ~4.8
+     * Mbps downlink against ~2.2 Mbps for the identical 720p30 uplink, and on
+     * 2.4GHz that headroom is what the two-way stall fed on. requestKeyFrame
+     * already covers recovery, so the short GOP bought nothing. */
+    cJSON_AddNumberToObject(h264, "pFrameCount", 39);
     cJSON_AddItemToObject(fc, "h264", h264);
     cJSON_AddItemToObject(p, "formatConfig", fc);
     return p;

@@ -39,6 +39,9 @@ typedef enum
     DBEVT_LAN_UDP_SERVICE_STOP,
     DBEVT_LAN_TCP_SERVICE_STOP_RESPONSE,
     DBEVT_LAN_UDP_SERVICE_STOP_RESPONSE,
+    /* Posted by the keepalive timer so the heartbeat is transmitted from the
+     * doorbell_core thread instead of the FreeRTOS timer service task. */
+    DBEVT_SEND_HEARTBEAT,
 #endif
 } dbevt_t;
 

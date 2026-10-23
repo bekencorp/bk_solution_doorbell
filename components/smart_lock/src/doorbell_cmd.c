@@ -181,6 +181,13 @@ int doorbell_keep_alive_stop_timer(void)
     {
         int err;
 
+        /* Called from the disconnect path (doorbell_core.c), which may run before
+         * the phone has ever asked for a keepalive - there may be no timer yet. */
+        if (db_cmd_info->timer.handle == NULL)
+        {
+            return BK_OK;
+        }
+
         err = rtos_stop_timer(&db_cmd_info->timer);
         if (BK_OK != err)
         {

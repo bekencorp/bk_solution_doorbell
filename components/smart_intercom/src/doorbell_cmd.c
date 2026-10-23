@@ -93,10 +93,54 @@ void doorbell_transmission_device_power_on_notify(void)
 }
 #endif
 
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+/* Set once a heartbeat has been queued to doorbell_core and cleared once that
+ * thread has taken it. Keeps at most one heartbeat in the 10-deep core queue so
+ * a slow send can never crowd out a disconnect event. */
+static volatile bool s_heartbeat_pending = false;
+
+void doorbell_keep_alive_send_now(void)
+{
+    s_heartbeat_pending = false;
+    doorbell_jsonrpc_send_notify("doorbell.notify.heartbeat", NULL);
+}
+#endif
+
 static void doorbell_keep_alive_timer_handler(void *data)
 {
     (void)data;
-    doorbell_jsonrpc_send_notify("doorbell.notify.heartbeat", NULL);
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+    doorbell_msg_t msg;
+
+    /*
+     * Hand the send to doorbell_core instead of doing it here.
+     *
+     * This callback runs on the FreeRTOS timer service task, which every
+     * software timer in the system shares, and doorbell_jsonrpc_send_notify()
+     * ends in a blocking TCP write. A field capture caught that write parked in
+     * lwip for 32s while the WiFi TX path was jammed: the encoder stats, DPU
+     * flush and audio counter timers all stopped with it, so the device kept
+     * capturing at 30fps but went completely silent on the wire until the
+     * socket was finally aborted.
+     */
+    if (s_heartbeat_pending)
+    {
+        /* Previous heartbeat has not been sent yet - the control channel is
+         * backed up. Skipping is correct: a stale heartbeat carries nothing the
+         * next one will not. */
+        LOGW("heartbeat still queued, skip this tick\r\n");
+        return;
+    }
+
+    msg.event = DBEVT_SEND_HEARTBEAT;
+    msg.param = 0;
+
+    if (doorbell_send_msg(&msg) == BK_OK)
+    {
+        s_heartbeat_pending = true;
+    }
+#endif
 }
 
 int doorbell_keep_alive_start_timer(UINT32 time_ms)
@@ -157,6 +201,19 @@ int doorbell_keep_alive_stop_timer(void)
     if (db_cmd_info)
     {
         int err;
+
+#if CONFIG_NTWK_CLIENT_SERVICE_ENABLE
+        /* Drop any heartbeat still queued to doorbell_core, otherwise the flag
+         * stays set across a reconnect and silences the restarted timer. */
+        s_heartbeat_pending = false;
+#endif
+
+        /* Called from the disconnect path, which also runs before the phone has
+         * ever asked for a keepalive - there may be no timer yet. */
+        if (db_cmd_info->timer.handle == NULL)
+        {
+            return BK_OK;
+        }
 
         err = rtos_stop_timer(&db_cmd_info->timer);
         if (BK_OK != err)

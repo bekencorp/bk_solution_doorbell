@@ -22,6 +22,7 @@
 #endif
 
 #define TAG "db-dl-vid"
+
 #define LOGI(...) BK_LOGI(TAG, ##__VA_ARGS__)
 #define LOGW(...) BK_LOGW(TAG, ##__VA_ARGS__)
 #define LOGE(...) BK_LOGE(TAG, ##__VA_ARGS__)
@@ -58,9 +59,23 @@
  * pp_buf (~92KB) + ping-pong (~60KB) leaves ~142KB HSRAM; compositor GPU also
  * needs VG-Lite contiguous + 10KB flexa thread stack. VG-Lite heap size is
  * calculated at runtime (blit-only, tess=0). Do NOT drop below seg=3. */
-#define DL_SEG_NUM_SHALLOW_UPLINK  3U
+/* Hard floor for the bonded H264-decode <-> GPU ring depth. Below this the
+ * decoder stalls waiting for the ring to drain and frames time out. Never go
+ * below this. */
+#define DL_SEG_NUM_MIN_BOND        3U
+/* Target ring depth when a concurrent uplink is running. A deeper ring gives
+ * the decoder more tolerance to GPU jitter (it does not add throughput). This is
+ * a target, not a requirement: dl_hsram_alloc_pp_buf() steps down towards
+ * DL_SEG_NUM_MIN_BOND when HSRAM is short, so the two constants must stay
+ * distinct to leave the retry loop room to step down. */
+#define DL_SEG_NUM_SHALLOW_UPLINK  4U
 #define DL_SEG_NUM_SHALLOW_720_INTERCOM  DL_SEG_NUM_SHALLOW_UPLINK
-#define DL_SEG_NUM_SHALLOW_1080    DL_SEG_NUM_SHALLOW_UPLINK
+/* 1080p stays at the floor and must not track the 720p target: one segment is
+ * much larger there, so a deeper ring plus the concurrent uplink encoder would
+ * exceed the HSRAM budget. The over-budget only surfaces after the ring is
+ * allocated, which the step-down loop cannot detect, so cap 1080p at the floor.
+ */
+#define DL_SEG_NUM_SHALLOW_1080    DL_SEG_NUM_MIN_BOND
 /* Height (px) at/above which the 1080p-class shallow ring depth is used. */
 #define DL_SEG_1080_HEIGHT_MIN   1080U
 /* Full-frame ring budget: width * (16 * frame_segs) * 3/2 above this -> shallow. */
@@ -97,6 +112,18 @@
 /* Min interval between doorbell.notify.requestKeyFrame sends (>=300ms)
  * to avoid an IDR-request storm when frames keep being lost. */
 #define DL_KEYREQ_MIN_INTERVAL_MS 300U
+/* Ceiling for the exponential backoff applied to repeated key-frame requests.
+ * Only one IDR is needed to resynchronise: while waiting for it, every non-IDR
+ * access unit is dropped, so extra requests add I-frame traffic without helping.
+ * Backing off up to 2s caps that overhead while still recovering within about
+ * one negotiated GOP. */
+#define DL_KEYREQ_MAX_INTERVAL_MS 2000U
+/* Consecutive good decodes required before the request interval is reset back to
+ * DL_KEYREQ_MIN_INTERVAL_MS. Must be >1: a struggling stream still decodes the
+ * occasional IDR, and resetting on a single decode would keep rearming the fast
+ * path. ~30 frames is about 1s of clean playback at 30fps, which only a healthy
+ * stream sustains. */
+#define DL_KEYREQ_HEALTHY_STREAK  30U
 
 /* ============================================================================
  * PERF TEST ONLY: replay a cached GOP to measure the pure
@@ -106,10 +133,10 @@
  * When DL_TEST_LOOP_GOP is 1, the decode task caches ONE IDR (I) + ONE P access
  * unit off the live wifi stream, then STOPS consuming wifi and replays a
  * synthetic GOP forever: decode the I once, then the P DL_TEST_LOOP_GOP_PCOUNT
- * times, repeat. This reproduces the real 1:29 I:P mix (pFrameCount=29) so the
+ * times, repeat. This reproduces the real 1:39 I:P mix (pFrameCount=39) so the
  * averaged "cost: h264d+gpu_wait ... ~N.Nfps" line from dl_stats_dump() matches
  * a live stream, AND the picture keeps changing (the looped P accumulates motion
- * for 29 frames, then the I snaps it back) instead of freezing on one frame.
+ * for 39 frames, then the I snaps it back) instead of freezing on one frame.
  * Every replayed frame still runs the full decode->GPU->DPU chain.
  *
  * MUST be 0 for normal operation (any real video call needs live wifi frames).
@@ -123,9 +150,9 @@
 #define DL_TEST_LOOP_GOP  0
 #endif
 
-/* P-frame repeat count between two I frames (matches pFrameCount=29). */
+/* P-frame repeat count between two I frames (matches pFrameCount=39). */
 #ifndef DL_TEST_LOOP_GOP_PCOUNT
-#define DL_TEST_LOOP_GOP_PCOUNT  29U
+#define DL_TEST_LOOP_GOP_PCOUNT  39U
 #endif
 
 /* DISCRIMINANT: force the PSRAM0 decoder recon write-through cover OFF via
@@ -420,9 +447,40 @@ static void dl_stats_stop(void)
     s_dl.stats_timer_on = 0U;
 }
 
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+/* Ask the App for an IDR, rate limited with exponential backoff. The first
+ * request goes out at DL_KEYREQ_MIN_INTERVAL_MS; each further request while
+ * still waiting doubles the gap up to DL_KEYREQ_MAX_INTERVAL_MS.
+ * dl_keyreq_reset() returns the interval to the minimum once decoding recovers. */
+static void dl_keyreq_send(uint32_t *last_keyreq_ms, uint32_t *keyreq_interval_ms)
+{
+    uint32_t now = rtos_get_time();
+
+    if ((now - *last_keyreq_ms) < *keyreq_interval_ms)
+    {
+        return;
+    }
+
+    (void)doorbell_notify_request_keyframe("frameLoss", "h264");
+    *last_keyreq_ms = now;
+
+    *keyreq_interval_ms *= 2U;
+    if (*keyreq_interval_ms > DL_KEYREQ_MAX_INTERVAL_MS)
+    {
+        *keyreq_interval_ms = DL_KEYREQ_MAX_INTERVAL_MS;
+    }
+}
+
+static void dl_keyreq_reset(uint32_t *keyreq_interval_ms)
+{
+    *keyreq_interval_ms = DL_KEYREQ_MIN_INTERVAL_MS;
+}
+#endif /* CONFIG_SMART_INTERCOM_DL_REQUEST_IDR */
+
 static void dl_apply_ref_break(uint8_t *wait_idr,
 #if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
                                uint32_t *last_keyreq_ms,
+                               uint32_t *keyreq_interval_ms,
 #endif
                                const char *reason)
 {
@@ -442,14 +500,9 @@ static void dl_apply_ref_break(uint8_t *wait_idr,
 #endif
 
 #if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
-    if (last_keyreq_ms != NULL)
+    if (last_keyreq_ms != NULL && keyreq_interval_ms != NULL)
     {
-        uint32_t now = rtos_get_time();
-        if ((now - *last_keyreq_ms) >= DL_KEYREQ_MIN_INTERVAL_MS)
-        {
-            (void)doorbell_notify_request_keyframe("frameLoss", "h264");
-            *last_keyreq_ms = now;
-        }
+        dl_keyreq_send(last_keyreq_ms, keyreq_interval_ms);
     }
 #endif
 }
@@ -557,7 +610,12 @@ static void dl_hsram_aligned_free(void *ptr)
  * and shared by every os_malloc, so only take the ring from SRAM when a safety
  * margin still remains; otherwise fall back to the HSRAM heap. os_free()
  * dispatches by address range, so dl_hsram_aligned_free() releases either heap
- * correctly. */
+ * correctly.
+ *
+ * A downlink-only session has no uplink ISP ring, so SRAM5/6 has enough room for
+ * the downlink ring - that is the case this option exists for. With a concurrent
+ * uplink the ISP ring takes SRAM5/6 first, so the downlink ring falls back to
+ * HSRAM; that fallback is expected, not a degradation. */
 #define DL_FLEXA_RING_ON_SRAM          1
 #define DL_FLEXA_SRAM_KEEP_FREE_BYTES  (24U * 1024U)
 
@@ -617,7 +675,10 @@ static uint8_t *dl_flexa_ring_malloc(uint32_t pp_size)
     }
     else
     {
-        LOGW("DL FLEXA ring: SRAM5/6 low (free=%u need>=%u+%u), fall back to HSRAM\n",
+        /* Expected whenever an uplink is live: the ISP FLEXA ring already owns
+         * most of the SRAM5/6 heap, so fall back to HSRAM. Logged at info, not
+         * warning, since it is a normal path. */
+        LOGI("DL FLEXA ring: SRAM5/6 unavailable (free=%u need>=%u+%u), use HSRAM\n",
              (unsigned)sram_free, (unsigned)total,
              (unsigned)DL_FLEXA_SRAM_KEEP_FREE_BYTES);
     }
@@ -658,6 +719,7 @@ static bool dl_hsram_compositor_fits(void)
 {
     uint32_t vg_bytes = dl_gpu_vg_budget_bytes();
     uint32_t need;
+    void *vg_probe;
 
     if (vg_bytes == 0)
     {
@@ -665,7 +727,27 @@ static bool dl_hsram_compositor_fits(void)
     }
 
     need = vg_bytes + DL_GPU_FLEXA_STACK_BYTES + DL_GPU_HSram_HEADROOM;
-    return rtos_get_hsram_free_heap_size() >= need;
+    if (rtos_get_hsram_free_heap_size() < need)
+    {
+        return false;
+    }
+
+    /*
+     * Total free is necessary but not sufficient: bk_gpu_init() needs vg_bytes as
+     * one contiguous block, and a fragmented heap can have enough total free yet
+     * fail that allocation. Prove the contiguous block is obtainable by probing
+     * for it, then release it immediately.
+     */
+    vg_probe = hsram_malloc(vg_bytes);
+    if (vg_probe == NULL)
+    {
+        LOGW("DL HSRAM: %u contiguous for VG unavailable (free=%u), fragmented\n",
+             (unsigned)vg_bytes, (unsigned)rtos_get_hsram_free_heap_size());
+        return false;
+    }
+    hsram_free(vg_probe);
+
+    return true;
 }
 
 /* Reserve compositor GPU ping-pong first, then the FLEXA decode ring. Probing
@@ -696,8 +778,10 @@ static bk_err_t dl_hsram_alloc_pp_buf(uint16_t width, uint16_t height,
 
     while (true)
     {
-        uint32_t min_seg = (height < DL_SEG_1080_HEIGHT_MIN) ? DL_SEG_NUM_SHALLOW_720_INTERCOM
-                                                             : DL_SEG_NUM_SHALLOW_UPLINK;
+        /* Floor, not target: the loop starts at ideal_seg and steps down to this
+         * floor, so a build that cannot afford the target settles for a shallower
+         * ring instead of failing to allocate. */
+        uint32_t min_seg = DL_SEG_NUM_MIN_BOND;
         uint32_t pp_size = bk_image_size_get(width,
                                              16U * DL_SEG_HEIGHT_MB * seg,
                                              BK_PIXEL_FORMAT_NV12);
@@ -826,8 +910,13 @@ static void dl_decode_task_entry(void *arg)
 #endif
     uint32_t skipped = 0U;
 #if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
-    /* Last doorbell.notify.requestKeyFrame send time, for >=300ms debounce. */
+    /* Last requestKeyFrame send time and the current backoff window (starts at
+     * DL_KEYREQ_MIN_INTERVAL_MS, doubles per repeat; see dl_keyreq_send). */
     uint32_t last_keyreq_ms = 0U;
+    uint32_t keyreq_interval_ms = DL_KEYREQ_MIN_INTERVAL_MS;
+    /* Consecutive successful decodes; gates the backoff reset (see
+     * DL_KEYREQ_HEALTHY_STREAK). */
+    uint32_t decode_ok_streak = 0U;
 #endif
 
     (void)arg;
@@ -896,6 +985,7 @@ static void dl_decode_task_entry(void *arg)
             dl_apply_ref_break(&wait_idr,
 #if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
                                &last_keyreq_ms,
+                               &keyreq_interval_ms,
 #endif
                                "idle");
             continue;
@@ -904,6 +994,7 @@ static void dl_decode_task_entry(void *arg)
         dl_apply_ref_break(&wait_idr,
 #if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
                            &last_keyreq_ms,
+                           &keyreq_interval_ms,
 #endif
                            "slot_drop");
 
@@ -945,22 +1036,14 @@ static void dl_decode_task_entry(void *arg)
             skipped++;
             s_dl.st_dec_skip++;
 #if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+            decode_ok_streak = 0U;  /* not healthy: keep the backoff climbing */
             /* Escape the wait-for-IDR deadlock. While skipping non-IDR AUs we
-             * never reach the decode-failure branch that asks for a key frame,
-             * so if the stream carries no near-term IDR (e.g. the channel was
-             * (re)opened mid-GOP during an on/off stress test), keep requesting
-             * one -- rate limited -- until an IDR arrives and decoding resyncs.
-             * Without this the local picture stays frozen forever: the main
-             * layer is decode-driven and the PIP self-view is only enabled after
-             * the first successful decode, so zero decodes == both frozen. */
-            {
-                uint32_t now = rtos_get_time();
-                if ((now - last_keyreq_ms) >= DL_KEYREQ_MIN_INTERVAL_MS)
-                {
-                    (void)doorbell_notify_request_keyframe("frameLoss", "h264");
-                    last_keyreq_ms = now;
-                }
-            }
+             * never reach the decode-failure branch, so if the stream carries no
+             * near-term IDR (e.g. the channel was (re)opened mid-GOP) keep
+             * requesting one until an IDR arrives and decoding resyncs. This runs
+             * once per dropped AU, so its cadence relies on the backoff inside
+             * dl_keyreq_send(). */
+            dl_keyreq_send(&last_keyreq_ms, &keyreq_interval_ms);
 #endif
             doorbell_downlink_free_push(frame);
             continue;
@@ -976,6 +1059,21 @@ static void dl_decode_task_entry(void *arg)
 
 #if CONFIG_SMART_INTERCOM_DL_WAIT_IDR
             wait_idr = 0U; /* reference chain valid again */
+#endif
+#if CONFIG_SMART_INTERCOM_DL_REQUEST_IDR
+            /* Only a sustained run of good decodes counts as recovery. A single
+             * decoded frame may just be one IDR that got through before the next
+             * reference break, so require DL_KEYREQ_HEALTHY_STREAK in a row
+             * before resetting the backoff: a struggling stream never satisfies
+             * it, healthy playback satisfies it in well under a second. */
+            if (decode_ok_streak < DL_KEYREQ_HEALTHY_STREAK)
+            {
+                decode_ok_streak++;
+                if (decode_ok_streak == DL_KEYREQ_HEALTHY_STREAK)
+                {
+                    dl_keyreq_reset(&keyreq_interval_ms);
+                }
+            }
 #endif
 #if DL_TEST_LOOP_GOP
             /* Capture one IDR + one P off the live stream to build the synthetic
@@ -1044,15 +1142,13 @@ static void dl_decode_task_entry(void *arg)
              * rate-limited to avoid an IDR-request storm. Only a
              * genuine decode failure (a lost reference) triggers this, so an
              * undecodable IDR is also covered. With DL_WAIT_IDR on, at most one
-             * failure fires per loss event; with it off, the debounce caps sends. */
-            {
-                uint32_t now = rtos_get_time();
-                if ((now - last_keyreq_ms) >= DL_KEYREQ_MIN_INTERVAL_MS)
-                {
-                    (void)doorbell_notify_request_keyframe("frameLoss", "h264");
-                    last_keyreq_ms = now;
-                }
-            }
+             * failure fires per loss event; with it off, the debounce caps sends.
+             *
+             * Shares the backoff with the wait-for-IDR repeats on purpose: what
+             * matters on the air is the total request rate, not which branch
+             * emitted them. */
+            decode_ok_streak = 0U;
+            dl_keyreq_send(&last_keyreq_ms, &keyreq_interval_ms);
 #endif
         }
 
