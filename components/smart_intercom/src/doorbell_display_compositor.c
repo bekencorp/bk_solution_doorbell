@@ -773,6 +773,11 @@ static void comp_pip_idle_refresh(void *sp_frame)
 
     if (comp_pip_blit_overlay(bg, sp_frame) == AVDK_ERR_OK)
     {
+        /* Downlink is frozen, so the OSD (time) layers marked dirty by lcd_osd's
+         * 1s tick have no downlink frame_done to re-composite them. Push them
+         * onto this freshly-copied bg frame so the on-screen clock keeps
+         * ticking while the main picture is stalled. */
+        (void)bk_gpu_ioctl(s_comp.gpu, BK_GPU_IOCTL_REFRESH_DIRTY, bg);
         comp_display_push(bg, false);
     }
     else
