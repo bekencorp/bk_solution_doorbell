@@ -30,6 +30,7 @@
 
 建议客户选择 `release/v4.0.1.x` 系列中版本号最大的标签进行开发和量产。仅需体验最新功能或参与开发时，才建议使用 `release/v4.0.1` 分支。
 
+<!-- readme-get-started:code -->
 ## 获取代码
 
 BK7259 门铃方案和 Armino SMP SDK 均同步发布至 GitHub、Gitee 和 GitLab，可根据网络环境及访问权限选择代码源。
@@ -68,8 +69,7 @@ git clone --branch release/v4.0.1.6 https://github.com/bekencorp/bk_avdk_smp.git
 git clone --branch release/v4.0.1.6 https://github.com/bekencorp/bk_solution_doorbell.git
 ```
 
-代码获取的更多说明见 [Armino SMP 快速入门](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/zh_CN/v4.0.1/get-started/index.html)。
-
+<!-- readme-get-started:env -->
 ## 编译环境安装
 
 Armino SMP 支持本地编译和 Docker 编译，可根据开发平台选择以下方式部署编译环境。
@@ -90,10 +90,11 @@ sudo bash tools/env_tools/setup/armino_env_setup.sh
 
 ### Docker 编译
 
-Docker 编译镜像为 [`bekencorp/armino-idk`](https://hub.docker.com/r/bekencorp/armino-idk/tags)，请选择 `1.5` 或更高版本的镜像标签，支持 Windows / Linux / macOS。
+Docker 编译镜像为 [bekencorp/armino-idk](https://hub.docker.com/r/bekencorp/armino-idk/tags)，请选择 `1.5` 或更高版本的镜像标签，支持 Windows / Linux / macOS。
 
-详细安装步骤请参阅 [Armino SMP 快速入门：环境部署及编译](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/zh_CN/v4.0.1/get-started/index.html)。
+详细安装步骤请参阅 [环境部署及编译](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/zh_CN/v4.0.1/get-started/index.html#smp-get-started-env)。
 
+<!-- readme-get-started:build -->
 ## 编译工程
 
 以 `doorbell` 工程为例（位于 `projects/doorbell`），通过 `SDK_DIR` 指向 Armino SMP SDK 后本地编译：
@@ -119,6 +120,7 @@ projects/doorbell/build/bk7259/doorbell/package/all-app.bin
 
 其他工程请将命令中的路径与 `PROJECT` 参数替换为对应的 `projects/<工程名>`。
 
+<!-- readme-get-started:flash -->
 ## 烧录固件
 
 可选择以下任一方式烧录固件：
@@ -128,19 +130,18 @@ projects/doorbell/build/bk7259/doorbell/package/all-app.bin
 
 烧录时请选择上一节编译生成的 `all-app.bin` 固件文件。
 
-详细烧录流程请参阅 [Armino SMP 快速入门](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/zh_CN/v4.0.1/get-started/index.html)。
+详细烧录流程请参阅 [烧录代码](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/zh_CN/v4.0.1/get-started/index.html#smp-get-started-flash)。
 
 ## 参考工程
-
-| 工程名 | 主要功能 | 详细说明 |
-| --- | --- | --- |
-| [doorbell](../projects/doorbell/) | 可视门铃：摄像头采集、H.264 网络图传、LCD 显示、双向音频对讲、BLE 配网。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell/index.html) |
-| [doorbell_lp](../projects/doorbell_lp/) | 在 doorbell 基础上增加多媒体空闲后的低功耗保活。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell_lp/index.html) |
-| [doorbell_lp_QN128B832](../projects/doorbell_lp_QN128B832/) | doorbell_lp 的 BK7259QN128B832（B 版封装）适配工程，功能与 doorbell_lp 同类。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/doorbell_lp_QN128B832/index.html) |
-| [video_intercom](../projects/video_intercom/) | 双向可视对讲：JSON-RPC 控制通道，LCD 主画面显示对端下行视频并叠加本机 PIP 自拍小窗，配合双向音频。 | [详细说明及使用说明在线文档](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/video_intercom/index.html) |
-| [intercom_indoor_display](../projects/intercom_indoor_display/) | 室内对讲显示屏：720×1280 LVGL 界面、来电邀请/接听/挂断、开锁控制、对端全屏画面。 | [工程说明](../projects/intercom_indoor_display/README_CN.md) |
-
-各工程的适用场景与差异说明，请参阅在线文档的 [示例工程](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/index.html) 页面。
+以下列出参考工程，可点击查看工程详细说明。<!-- readme-projects:begin -->
+- [doorbell](/projects/doorbell/)
+- [doorbell_lp](/projects/doorbell_lp/)
+- [doorbell_lp_QN128B832](/projects/doorbell_lp_QN128B832/)
+- [doorbell_multi_session](/projects/doorbell_multi_session/)
+- [intercom_indoor_display](/projects/intercom_indoor_display/)
+- [video_intercom](/projects/video_intercom/)
+<!-- readme-projects:end -->
+各工程的适用场景与差异说明，请参阅在线文档的 [参考工程](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/zh_CN/v4.0.1/projects/index.html) 页面。
 
 ## BEKEN 相关资源
 

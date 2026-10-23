@@ -30,6 +30,7 @@ This solution uses a "maintenance branch + release tag" version management model
 
 Customers are advised to choose the tag with the highest version number in the `release/v4.0.1.x` series for development and mass production. Use the `release/v4.0.1` branch only when you need to try the latest features or participate in development.
 
+<!-- readme-get-started:code -->
 ## Get the Code
 
 Both the BK7259 Doorbell Solution and the Armino SMP SDK are published simultaneously to GitHub, Gitee, and GitLab. Choose a code source based on your network environment and access permissions.
@@ -68,8 +69,7 @@ git clone --branch release/v4.0.1.6 https://github.com/bekencorp/bk_avdk_smp.git
 git clone --branch release/v4.0.1.6 https://github.com/bekencorp/bk_solution_doorbell.git
 ```
 
-For more details on getting the code, see [Armino SMP Quick Start](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/en/v4.0.1/get-started/index.html).
-
+<!-- readme-get-started:env -->
 ## Set Up the Build Environment
 
 Armino SMP supports both local builds and Docker builds. Choose one of the following methods to set up the build environment based on your development platform.
@@ -90,10 +90,11 @@ Download and install [Armino Bash](https://dl.bekencorp.com/tools/arminosdk/Wind
 
 ### Docker Build
 
-The Docker build image is [`bekencorp/armino-idk`](https://hub.docker.com/r/bekencorp/armino-idk/tags). Please choose an image tag of `1.5` or higher, which supports Windows / Linux / macOS.
+The Docker build image is [bekencorp/armino-idk](https://hub.docker.com/r/bekencorp/armino-idk/tags). Please choose an image tag of `1.5` or higher, which supports Windows / Linux / macOS.
 
-For detailed setup steps, see [Armino SMP Quick Start: Environment deployment and build](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/en/v4.0.1/get-started/index.html).
+For detailed setup steps, see [Environment Deployment and Compilation](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/en/v4.0.1/get-started/index.html#smp-get-started-env).
 
+<!-- readme-get-started:build -->
 ## Build the Project
 
 Taking the `doorbell` project as an example (located at `projects/doorbell`), build locally after pointing `SDK_DIR` to the Armino SMP SDK:
@@ -119,6 +120,7 @@ projects/doorbell/build/bk7259/doorbell/package/all-app.bin
 
 For other projects, replace the path and the `PROJECT` parameter in the commands with the corresponding `projects/<project name>`.
 
+<!-- readme-get-started:flash -->
 ## Flash the Firmware
 
 You can flash the firmware using either of the following methods:
@@ -128,19 +130,18 @@ You can flash the firmware using either of the following methods:
 
 When flashing, select the `all-app.bin` firmware file generated in the previous section.
 
-For the detailed flashing process, see [Armino SMP Quick Start](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/en/v4.0.1/get-started/index.html).
+For the detailed flashing process, see [Burn Code](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7259/en/v4.0.1/get-started/index.html#smp-get-started-flash).
 
 ## Reference Projects
-
-| Project | Main features | Details |
-| --- | --- | --- |
-| [doorbell](../projects/doorbell/) | Video doorbell: camera capture, H.264 network streaming, LCD display, two-way audio intercom, BLE provisioning. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell/index.html) |
-| [doorbell_lp](../projects/doorbell_lp/) | Adds low-power keepalive after multimedia goes idle on top of doorbell. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell_lp/index.html) |
-| [doorbell_lp_QN128B832](../projects/doorbell_lp_QN128B832/) | BK7259QN128B832 (B-package) adaptation of doorbell_lp, with the same class of features. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/doorbell_lp_QN128B832/index.html) |
-| [video_intercom](../projects/video_intercom/) | Two-way video intercom: JSON-RPC control channel, LCD main view shows remote downlink video with a local PIP self-view, plus full-duplex audio. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/video_intercom/index.html) |
-| [intercom_indoor_display](../projects/intercom_indoor_display/) | Indoor intercom display: 720×1280 LVGL UI, invite/answer/hang-up call flow, unlock control, full-screen remote picture. | [Project README](../projects/intercom_indoor_display/README.md) |
-
-For the applicable scenarios and differences of each project, see the [example projects](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/index.html) page in the online documentation.
+The following reference projects are listed; click a name for details.<!-- readme-projects:begin -->
+- [doorbell](/projects/doorbell/)
+- [doorbell_lp](/projects/doorbell_lp/)
+- [doorbell_lp_QN128B832](/projects/doorbell_lp_QN128B832/)
+- [doorbell_multi_session](/projects/doorbell_multi_session/)
+- [intercom_indoor_display](/projects/intercom_indoor_display/)
+- [video_intercom](/projects/video_intercom/)
+<!-- readme-projects:end -->
+For the applicable scenarios and differences of each project, see the [reference projects](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7259/en/v4.0.1/projects/index.html) page in the online documentation.
 
 ## Beken Resources
 
