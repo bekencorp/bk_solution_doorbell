@@ -41,6 +41,7 @@ typedef struct
     struct {
         uint8_t mp_enable;
         uint8_t mp_flexa;
+        uint8_t mp_buf_hsram; /**< Allocate the MP flexa ring from HSRAM in the caller */
         uint16_t mp_width;
         uint16_t mp_height;
         bk_pixel_format_t mp_format;

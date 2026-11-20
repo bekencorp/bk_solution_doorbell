@@ -461,6 +461,58 @@ err:
     return (ret != BK_OK) ? ret : AVDK_ERR_GENERIC;
 }
 
+/* Release the caller-owned MP flexa ring when the camera controller drops it. */
+static void app_isp_mp_flexa_buf_release(void *buffer, void *user_data)
+{
+    (void)user_data;
+    hsram_free(buffer);
+}
+
+/* Allocate the MP flexa ring from HSRAM and hand it to the camera controller
+ * before channel open. The controller uses it instead of allocating, and fires
+ * the release callback when it drops the buffer. */
+static void app_isp_mp_flexa_buf_attach(bk_isp_camera_ctlr_handle_t ctlr,
+                                        const camera_board_config_t *config,
+                                        const bk_isp_camera_channel_config_t *instance)
+{
+    bk_isp_camera_flexa_buf_size_t query = {0};
+    bk_isp_camera_flexa_buf_t buf = {0};
+    avdk_err_t ret;
+
+    if (config == NULL || config->isp.mp_buf_hsram == 0 || instance->enable_flexa == 0)
+    {
+        return;
+    }
+
+    query.buf_cnt = instance->buf_cnt;
+    query.width = instance->width;
+    ret = bk_isp_camera_ctlr_ioctl(ctlr, BK_CAM_IOCTL_GET_FLEXA_BUF_SIZE, &query);
+    if (ret != AVDK_ERR_OK || query.size == 0)
+    {
+        LOGW("%s, get flexa buf size failed ret: %d\n", __func__, ret);
+        return;
+    }
+
+    buf.buffer = hsram_malloc(query.size);
+    if (buf.buffer == NULL)
+    {
+        LOGW("%s, hsram malloc %u failed, use internal buffer\n",
+             __func__, (unsigned)query.size);
+        return;
+    }
+
+    buf.channel = ISP_MP_CHN_ID;
+    buf.size = query.size;
+    buf.release_cb = app_isp_mp_flexa_buf_release;
+
+    ret = bk_isp_camera_ctlr_ioctl(ctlr, BK_CAM_IOCTL_SET_FLEXA_BUF, &buf);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGW("%s, set flexa buf failed ret: %d\n", __func__, ret);
+        hsram_free(buf.buffer);
+    }
+}
+
 int app_isp_mipi_camera_mp_turn_on(const camera_board_config_t *config, bk_isp_camera_ctlr_config_t *isp_ctlr_config)
 {
     bk_err_t ret = BK_OK;
@@ -487,6 +539,8 @@ int app_isp_mipi_camera_mp_turn_on(const camera_board_config_t *config, bk_isp_c
     instance.enable_flexa = config->isp.mp_flexa ? 1 : 0;
     instance.work_mode = config->isp.mp_flexa ? 1 : 0;
     instance.format = config->isp.mp_format;
+
+    app_isp_mp_flexa_buf_attach(isp_cam_handle.camera_ctlr_handle, config, &instance);
 
     ret = bk_isp_camera_channel_open(isp_cam_handle.camera_ctlr_handle, ISP_MP_CHN_ID, &instance);
 

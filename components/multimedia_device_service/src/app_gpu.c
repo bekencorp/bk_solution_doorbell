@@ -68,6 +68,93 @@ static void app_gpu_frame_complete(void *frame, uint32_t frame_size, void *args)
     }
 }
 
+#if (CONFIG_VG_LITE_GPU)
+/* Release a caller-owned GPU buffer when the GPU controller drops it. */
+static void app_gpu_hsram_buf_release(void *buffer, void *user_data)
+{
+    (void)user_data;
+    hsram_free(buffer);
+}
+
+/* Allocate the VG-Lite contiguous buffer and the flexa ping-pong buffer from
+ * HSRAM and hand both to the GPU controller before init/open. */
+static avdk_err_t app_gpu_hsram_buffers_attach(bk_gpu_ctlr_handle_t ctlr,
+                                               const gpu_board_config_t *config,
+                                               const bk_gpu_ctlr_config_t *gpu_config)
+{
+    bk_gpu_vg_mem_size_t vg_query = {0};
+    bk_gpu_vg_mem_buf_t vg_buf = {0};
+    bk_gpu_output_buf_size_t out_query = {0};
+    bk_gpu_output_buf_t out_buf = {0};
+    avdk_err_t ret;
+
+    if (config->flexa.internal_buf_hsram == 0)
+    {
+        return AVDK_ERR_OK;
+    }
+
+    vg_query.tess_width = gpu_config->tess_width;
+    vg_query.tess_height = gpu_config->tess_height;
+    ret = bk_gpu_ioctl(ctlr, BK_GPU_IOCTL_GET_VG_MEM_SIZE, &vg_query);
+    if (ret != AVDK_ERR_OK || vg_query.size == 0)
+    {
+        LOGW("%s, get vg mem size failed ret: %d\n", __func__, ret);
+        return ret;
+    }
+
+    vg_buf.buffer = hsram_malloc(vg_query.size);
+    if (vg_buf.buffer == NULL)
+    {
+        LOGW("%s, hsram malloc vg %u failed, use internal buffer\n",
+             __func__, (unsigned)vg_query.size);
+        return AVDK_ERR_NOMEM;
+    }
+
+    vg_buf.size = vg_query.size;
+    vg_buf.release_cb = app_gpu_hsram_buf_release;
+    ret = bk_gpu_ioctl(ctlr, BK_GPU_IOCTL_SET_VG_MEM_BUF, &vg_buf);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGW("%s, set vg mem buf failed ret: %d\n", __func__, ret);
+        hsram_free(vg_buf.buffer);
+        return ret;
+    }
+
+    out_query.dst_width = gpu_config->dst_width;
+    out_query.dst_format = gpu_config->dst_format;
+    out_query.flexa_lines = gpu_config->flexa_lines;
+    out_query.compress = gpu_config->compress;
+    ret = bk_gpu_ioctl(ctlr, BK_GPU_IOCTL_GET_OUTPUT_BUF_SIZE, &out_query);
+    if (ret != AVDK_ERR_OK || out_query.size == 0)
+    {
+        LOGW("%s, get output buf size failed ret: %d\n", __func__, ret);
+        return ret;
+    }
+
+    out_buf.buffer = hsram_malloc(out_query.size);
+    if (out_buf.buffer == NULL)
+    {
+        LOGW("%s, hsram malloc output %u failed, use internal buffer\n",
+             __func__, (unsigned)out_query.size);
+        return AVDK_ERR_NOMEM;
+    }
+
+    out_buf.size = out_query.size;
+    out_buf.release_cb = app_gpu_hsram_buf_release;
+    ret = bk_gpu_ioctl(ctlr, BK_GPU_IOCTL_SET_OUTPUT_BUF, &out_buf);
+    if (ret != AVDK_ERR_OK)
+    {
+        LOGW("%s, set output buf failed ret: %d\n", __func__, ret);
+        hsram_free(out_buf.buffer);
+        return ret;
+    }
+
+    LOGI("%s, vg=%u output=%u on HSRAM\n", __func__,
+         (unsigned)vg_query.size, (unsigned)out_query.size);
+    return AVDK_ERR_OK;
+}
+#endif
+
 avdk_err_t app_gpu_turn_on(gpu_board_config_t *config)
 {
     bk_gpu_ctlr_config_t gpu_config;
@@ -122,6 +209,8 @@ avdk_err_t app_gpu_turn_on(gpu_board_config_t *config)
         LOGW("%s, %d\n", __func__, __LINE__);
         return AVDK_ERR_GENERIC;
     }
+
+    (void)app_gpu_hsram_buffers_attach(s_gpu_handle, config, &gpu_config);
 
     ret = bk_gpu_init(s_gpu_handle);
 

@@ -19,6 +19,7 @@ typedef struct
         bk_pixel_format_t dst_format;
         bool scale;
         bool dst_compress;
+        bool internal_buf_hsram;
     } flexa;
 } gpu_board_config_t;
 
