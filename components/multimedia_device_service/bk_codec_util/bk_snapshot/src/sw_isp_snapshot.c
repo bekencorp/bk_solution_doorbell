@@ -50,10 +50,13 @@ typedef struct {
 	bool mutex_inited;
 	bool sp_channel_open;
 	bool sp_owned_by_snapshot;
+	bool sp_close_after_capture;
 	bool sp_needs_warmup;
+	bool sp_pool_allocated;
 	uint16_t sp_width;
 	uint16_t sp_height;
 	bk_isp_camera_ctlr_handle_t sp_camera;
+	bk_isp_camera_frame_pool_t sp_frame_pool;
 	uint8_t *yuyv_buf;
 } bk_snapshot_sw_module_ctx_t;
 
@@ -143,6 +146,53 @@ static void bk_snapshot_sw_sp_fill_instance(bk_isp_camera_channel_config_t *inst
 	instance->format = BK_PIXEL_FORMAT_NV12;
 }
 
+static avdk_err_t bk_snapshot_sw_sp_channel_open(bk_isp_camera_ctlr_handle_t camera,
+							 uint16_t width,
+							 uint16_t height)
+{
+	bk_isp_camera_channel_config_t instance;
+	avdk_err_t ret;
+
+	if (s_sw_snapshot.sp_pool_allocated) {
+		LOGE("SP frame pool still owned, close the previous channel first\r\n");
+		return AVDK_ERR_BUSY;
+	}
+
+	bk_snapshot_sw_sp_fill_instance(&instance, width, height);
+	ret = bk_isp_camera_frame_pool_alloc(&instance, &s_sw_snapshot.sp_frame_pool);
+	if (ret != AVDK_ERR_OK) {
+		LOGE("SP frame pool alloc failed ret=%d\r\n", ret);
+		return ret;
+	}
+	s_sw_snapshot.sp_pool_allocated = true;
+
+	for (uint8_t i = 0; i < instance.buf_cnt; i++) {
+		bk_isp_camera_frame_info_t info = {
+			.addr = s_sw_snapshot.sp_frame_pool.buffers[i].addr,
+			.size = s_sw_snapshot.sp_frame_pool.buffers[i].size,
+			.channel = ISP_SP_CHN_ID,
+		};
+		ret = bk_isp_camera_ctlr_ioctl(camera, BK_CAM_IOCTL_FRAME_QBUF, &info);
+		if (ret != AVDK_ERR_OK) {
+			LOGE("SP pre-QBUF %u failed ret=%d\r\n", i, ret);
+			if (i > 0) {
+				(void)bk_isp_camera_channel_close(camera, ISP_SP_CHN_ID);
+			}
+			bk_isp_camera_frame_pool_free(&s_sw_snapshot.sp_frame_pool);
+			s_sw_snapshot.sp_pool_allocated = false;
+			return ret;
+		}
+	}
+
+	ret = bk_isp_camera_channel_open(camera, ISP_SP_CHN_ID, &instance);
+	if (ret != AVDK_ERR_OK) {
+		bk_isp_camera_frame_pool_free(&s_sw_snapshot.sp_frame_pool);
+		s_sw_snapshot.sp_pool_allocated = false;
+	}
+
+	return ret;
+}
+
 static bool bk_snapshot_sw_mp_channel_ready(bk_isp_camera_ctlr_handle_t camera)
 {
 	bk_camera_isp_ctlr_t *control;
@@ -174,13 +224,12 @@ static void bk_snapshot_sw_mp_frame_complete_cb(uint32_t seq, uint32_t line, uin
 }
 
 static avdk_err_t bk_snapshot_sw_sync_at_mp_frame_complete(bk_isp_camera_ctlr_handle_t camera,
-							   bool open_sp,
-							   uint16_t width,
-							   uint16_t height,
-							   avdk_err_t *open_ret)
+								   bool open_sp,
+								   uint16_t width,
+								   uint16_t height,
+								   avdk_err_t *open_ret)
 {
 	avdk_err_t ret = AVDK_ERR_OK;
-	bk_isp_camera_channel_config_t instance;
 
 	if (camera == NULL) {
 		return AVDK_ERR_INVAL;
@@ -191,8 +240,7 @@ static avdk_err_t bk_snapshot_sw_sync_at_mp_frame_complete(bk_isp_camera_ctlr_ha
 	}
 
 	if (open_sp && !bk_snapshot_sw_mp_channel_ready(camera)) {
-		bk_snapshot_sw_sp_fill_instance(&instance, width, height);
-		ret = bk_isp_camera_channel_open(camera, ISP_SP_CHN_ID, &instance);
+		ret = bk_snapshot_sw_sp_channel_open(camera, width, height);
 		if (open_ret != NULL) {
 			*open_ret = ret;
 		}
@@ -216,7 +264,7 @@ static avdk_err_t bk_snapshot_sw_sync_at_mp_frame_complete(bk_isp_camera_ctlr_ha
 	s_mp_frame_sync.sp_height = height;
 
 	ret = bk_isp_camera_register_isr_callback(camera, ISR_TYPE_FRAME_COMPLETE,
-						  bk_snapshot_sw_mp_frame_complete_cb, &s_mp_frame_sync);
+							  bk_snapshot_sw_mp_frame_complete_cb, &s_mp_frame_sync);
 	if (ret != AVDK_ERR_OK) {
 		s_mp_frame_sync.waiting = false;
 		LOGW("register MP frame-complete cb failed ret=%d\r\n", ret);
@@ -235,8 +283,7 @@ static avdk_err_t bk_snapshot_sw_sync_at_mp_frame_complete(bk_isp_camera_ctlr_ha
 		if (!s_mp_frame_sync.frame_complete_hit) {
 			ret = AVDK_ERR_TIMEOUT;
 		} else {
-			bk_snapshot_sw_sp_fill_instance(&instance, width, height);
-			ret = bk_isp_camera_channel_open(camera, ISP_SP_CHN_ID, &instance);
+			ret = bk_snapshot_sw_sp_channel_open(camera, width, height);
 			if (open_ret != NULL) {
 				*open_ret = ret;
 			}
@@ -255,91 +302,119 @@ static void bk_snapshot_sw_sp_state_clear(void)
 {
 	s_sw_snapshot.sp_channel_open = false;
 	s_sw_snapshot.sp_owned_by_snapshot = false;
+	s_sw_snapshot.sp_close_after_capture = false;
 	s_sw_snapshot.sp_camera = NULL;
 	s_sw_snapshot.sp_width = 0;
 	s_sw_snapshot.sp_height = 0;
 	s_sw_snapshot.sp_needs_warmup = false;
 }
 
+static avdk_err_t bk_snapshot_sw_sp_channel_close(void)
+{
+	avdk_err_t ret;
+
+	if (!s_sw_snapshot.sp_channel_open || !s_sw_snapshot.sp_owned_by_snapshot) {
+		return AVDK_ERR_OK;
+	}
+	if (s_sw_snapshot.sp_camera == NULL) {
+		LOGE("SP owner has no camera handle, frame pool retained\r\n");
+		return AVDK_ERR_NODEV;
+	}
+
+	ret = AVDK_ERR_OK;
+	if (bk_isp_camera_channel_state_get(s_sw_snapshot.sp_camera, ISP_SP_CHN_ID) !=
+	    ISP_CHANNEL_STATE_TURN_OFF) {
+		ret = bk_isp_camera_channel_close(s_sw_snapshot.sp_camera, ISP_SP_CHN_ID);
+	}
+	if (ret != AVDK_ERR_OK) {
+		LOGE("SP channel close failed ret=%d, owner and frame pool retained\r\n", ret);
+		return ret;
+	}
+
+	if (s_sw_snapshot.sp_pool_allocated) {
+		bk_isp_camera_frame_pool_free(&s_sw_snapshot.sp_frame_pool);
+		s_sw_snapshot.sp_pool_allocated = false;
+	}
+	bk_snapshot_sw_sp_state_clear();
+	return AVDK_ERR_OK;
+}
+
 avdk_err_t bk_snapshot_sw_sp_channel_open_at_mp_frame_complete(bk_isp_camera_ctlr_handle_t camera,
-							      uint16_t width,
-							      uint16_t height)
+								      uint16_t width,
+								      uint16_t height)
 {
 	avdk_err_t open_ret = AVDK_ERR_OK;
 	avdk_err_t ret;
 
-	ret = bk_snapshot_sw_sync_at_mp_frame_complete(camera, true, width, height, &open_ret);
+	ret = bk_snapshot_sw_mutex_lock();
 	if (ret != AVDK_ERR_OK) {
 		return ret;
 	}
 
-	return open_ret;
-}
-
-static avdk_err_t bk_snapshot_sw_sp_get_control(bk_isp_camera_ctlr_handle_t camera,
-						isp_control_t **isp_control,
-						isp_channel_config_t **sp_cfg)
-{
-	bk_camera_isp_ctlr_t *control;
-
-	if (camera == NULL || isp_control == NULL || sp_cfg == NULL) {
-		return AVDK_ERR_INVAL;
+	ret = bk_snapshot_sw_sync_at_mp_frame_complete(camera, true, width, height, &open_ret);
+	if (ret == AVDK_ERR_OK) {
+		ret = open_ret;
 	}
-
-	control = __containerof(camera, bk_camera_isp_ctlr_t, ops);
-	*isp_control = (isp_control_t *)control->isp_handle;
-	if (*isp_control == NULL || (*isp_control)->pop_buf == NULL || (*isp_control)->free_buf == NULL) {
-		return AVDK_ERR_NODEV;
+	if (ret == AVDK_ERR_OK) {
+		s_sw_snapshot.sp_channel_open = true;
+		s_sw_snapshot.sp_owned_by_snapshot = true;
+		s_sw_snapshot.sp_close_after_capture = false;
+		s_sw_snapshot.sp_camera = camera;
+		s_sw_snapshot.sp_width = width;
+		s_sw_snapshot.sp_height = height;
+		s_sw_snapshot.sp_needs_warmup = false;
 	}
-
-	*sp_cfg = &(*isp_control)->chn[ISP_SP_CHN_ID];
-	if (!(*sp_cfg)->enable) {
-		LOGE("SP channel not enabled\r\n");
-		return AVDK_ERR_NODEV;
-	}
-
-	return AVDK_ERR_OK;
+	bk_snapshot_sw_mutex_unlock();
+	return ret;
 }
 
 static avdk_err_t bk_snapshot_sw_sp_drop_frame(bk_isp_camera_ctlr_handle_t camera, uint32_t timeout_ms)
 {
-	isp_control_t *isp_control = NULL;
-	isp_channel_config_t *sp_cfg = NULL;
-	VIDEO_BUF_S buf = {0};
-	int ret;
-	avdk_err_t err;
+	bk_isp_camera_frame_info_t frame = {
+		.channel = ISP_SP_CHN_ID,
+		.port_id = BK_ISP_CAMERA_INVALID_PORT_ID,
+		.timeout = timeout_ms,
+	};
+	avdk_err_t ret;
 
-	err = bk_snapshot_sw_sp_get_control(camera, &isp_control, &sp_cfg);
-	if (err != AVDK_ERR_OK) {
-		return err;
+	ret = bk_isp_camera_ctlr_ioctl(camera, BK_CAM_IOCTL_FRAME_DQBUF, &frame);
+	if (ret != AVDK_ERR_OK) {
+		LOGE("SP warmup DQBUF failed ret=%d\r\n", ret);
+		return ret;
 	}
 
-	ret = isp_control->pop_buf(sp_cfg->channel, &buf, timeout_ms);
-	if (ret != BK_OK) {
-		LOGE("SP warmup pop_buf failed ret=%d\r\n", ret);
-		return AVDK_ERR_TIMEOUT;
+	ret = bk_isp_camera_ctlr_ioctl(camera, BK_CAM_IOCTL_FRAME_QBUF, &frame);
+	if (ret != AVDK_ERR_OK) {
+		LOGE("SP warmup QBUF failed ret=%d\r\n", ret);
 	}
-
-	isp_control->free_buf(sp_cfg->channel, &buf);
-	return AVDK_ERR_OK;
+	return ret;
 }
 
 static avdk_err_t bk_snapshot_sw_sp_channel_ensure(bk_isp_camera_ctlr_handle_t camera,
-						   uint16_t width,
-						   uint16_t height)
+							   uint16_t width,
+							   uint16_t height)
 {
 	avdk_err_t ret;
 	bool channel_on;
+	bool owned_channel_on;
 
 	if (camera == NULL) {
 		return AVDK_ERR_INVAL;
 	}
 
 	channel_on = (bk_isp_camera_channel_state_get(camera, ISP_SP_CHN_ID) ==
-		      ISP_CHANNEL_STATE_TURN_ON);
+			      ISP_CHANNEL_STATE_TURN_ON);
 	if (!channel_on && s_sw_snapshot.sp_channel_open) {
 		LOGW("SP software state stale after camera off, will reopen\r\n");
-		bk_snapshot_sw_sp_state_clear();
+		if (s_sw_snapshot.sp_owned_by_snapshot) {
+			ret = bk_snapshot_sw_sp_channel_close();
+			if (ret != AVDK_ERR_OK) {
+				LOGE("stale SP channel close failed ret=%d, reopen aborted\r\n", ret);
+				return ret;
+			}
+		} else {
+			bk_snapshot_sw_sp_state_clear();
+		}
 	}
 	if (channel_on &&
 	    s_sw_snapshot.sp_width != 0 &&
@@ -349,8 +424,18 @@ static avdk_err_t bk_snapshot_sw_sp_channel_ensure(bk_isp_camera_ctlr_handle_t c
 		return AVDK_ERR_BUSY;
 	}
 	if (channel_on) {
+		owned_channel_on = (s_sw_snapshot.sp_channel_open &&
+				    s_sw_snapshot.sp_owned_by_snapshot &&
+				    s_sw_snapshot.sp_camera == camera);
+		if (s_sw_snapshot.sp_pool_allocated && !owned_channel_on) {
+			LOGE("SP frame pool belongs to another channel state\r\n");
+			return AVDK_ERR_BUSY;
+		}
 		s_sw_snapshot.sp_channel_open = true;
-		s_sw_snapshot.sp_owned_by_snapshot = false;
+		if (!owned_channel_on) {
+			s_sw_snapshot.sp_owned_by_snapshot = false;
+			s_sw_snapshot.sp_close_after_capture = false;
+		}
 		s_sw_snapshot.sp_camera = camera;
 		s_sw_snapshot.sp_width = width;
 		s_sw_snapshot.sp_height = height;
@@ -366,6 +451,7 @@ static avdk_err_t bk_snapshot_sw_sp_channel_ensure(bk_isp_camera_ctlr_handle_t c
 
 	s_sw_snapshot.sp_channel_open = true;
 	s_sw_snapshot.sp_owned_by_snapshot = true;
+	s_sw_snapshot.sp_close_after_capture = true;
 	s_sw_snapshot.sp_camera = camera;
 	s_sw_snapshot.sp_width = width;
 	s_sw_snapshot.sp_height = height;
@@ -540,10 +626,8 @@ avdk_err_t bk_snapshot_sw_capture(bk_snapshot_sw_config_t *config,
 	uint32_t jpeg_size = 0;
 	uint32_t i;
 	bk_isp_camera_ctlr_handle_t camera;
-	isp_control_t *isp_control = NULL;
-	isp_channel_config_t *sp_cfg = NULL;
-	VIDEO_BUF_S sp_buf = {0};
-	bool sp_buf_held = false;
+	bk_isp_camera_frame_info_t sp_frame = {0};
+	bool sp_frame_held = false;
 	const uint8_t *nv12_y = NULL;
 	const uint8_t *nv12_uv = NULL;
 
@@ -604,40 +688,19 @@ avdk_err_t bk_snapshot_sw_capture(bk_snapshot_sw_config_t *config,
 		LOGW("wait MP frame-complete before read failed ret=%d\r\n", ret);
 	}
 
-	ret = bk_snapshot_sw_sp_get_control(camera, &isp_control, &sp_cfg);
+	sp_frame.channel = ISP_SP_CHN_ID;
+	sp_frame.port_id = BK_ISP_CAMERA_INVALID_PORT_ID;
+	sp_frame.timeout = frame_timeout_ms;
+	ret = bk_isp_camera_ctlr_ioctl(camera, BK_CAM_IOCTL_FRAME_DQBUF, &sp_frame);
 	if (ret == AVDK_ERR_OK) {
-		int pop_ret = isp_control->pop_buf(sp_cfg->channel, &sp_buf, frame_timeout_ms);
-		if (pop_ret == BK_OK) {
-			sp_buf_held = true;
-		} else {
-			LOGE("SP pop_buf failed ret=%d\r\n", pop_ret);
-			ret = AVDK_ERR_TIMEOUT;
-		}
+		sp_frame_held = true;
+	} else {
+		LOGE("SP frame DQBUF failed ret=%d\r\n", ret);
 	}
 	if (ret == AVDK_ERR_OK) {
-		if (sp_buf.numPlanes >= 2) {
-			uintptr_t y_addr = (uintptr_t)sp_buf.planes[0].dmaPhyAddr;
-			uintptr_t uv_addr = (uintptr_t)sp_buf.planes[1].dmaPhyAddr;
-			uint32_t y_size = sp_buf.planes[0].size;
-			uint32_t uv_size = sp_buf.planes[1].size;
-
-			if (y_addr != 0 && uv_addr != 0 && y_size >= y_plane_size &&
-			    uv_size >= (nv12_size - y_plane_size)) {
-				nv12_y = (const uint8_t *)y_addr;
-				nv12_uv = (const uint8_t *)uv_addr;
-			} else {
-				ret = AVDK_ERR_INVAL;
-			}
-		} else if (sp_buf.numPlanes >= 1) {
-			uintptr_t y_addr = (uintptr_t)sp_buf.planes[0].dmaPhyAddr;
-			uint32_t frame_size = sp_buf.imageSize ? sp_buf.imageSize : sp_buf.planes[0].size;
-
-			if (y_addr != 0 && frame_size >= nv12_size) {
-				nv12_y = (const uint8_t *)y_addr;
-				nv12_uv = nv12_y + y_plane_size;
-			} else {
-				ret = AVDK_ERR_INVAL;
-			}
+		if (sp_frame.addr != 0 && sp_frame.length >= nv12_size) {
+			nv12_y = (const uint8_t *)(uintptr_t)sp_frame.addr;
+			nv12_uv = nv12_y + y_plane_size;
 		} else {
 			ret = AVDK_ERR_INVAL;
 		}
@@ -671,14 +734,20 @@ avdk_err_t bk_snapshot_sw_capture(bk_snapshot_sw_config_t *config,
 	LOGI("sw snapshot ok size=%u %ux%u\r\n", out_image->size, width, height);
 
 cleanup:
-	if (sp_buf_held && isp_control != NULL && sp_cfg != NULL) {
-		isp_control->free_buf(sp_cfg->channel, &sp_buf);
-		sp_buf_held = false;
+	if (sp_frame_held) {
+		avdk_err_t qbuf_ret = bk_isp_camera_ctlr_ioctl(camera, BK_CAM_IOCTL_FRAME_QBUF, &sp_frame);
+		sp_frame_held = false;
+		if (qbuf_ret != AVDK_ERR_OK) {
+			LOGE("SP frame QBUF failed ret=%d\r\n", qbuf_ret);
+		}
 	}
-	if (s_sw_snapshot.sp_owned_by_snapshot && s_sw_snapshot.sp_camera == camera) {
-		(void)bk_isp_camera_channel_close(camera, ISP_SP_CHN_ID);
-		bk_snapshot_sw_sp_state_clear();
-		LOGI("SP channel closed after snapshot\r\n");
+	if (s_sw_snapshot.sp_close_after_capture && s_sw_snapshot.sp_owned_by_snapshot &&
+	    s_sw_snapshot.sp_camera == camera) {
+		if (bk_snapshot_sw_sp_channel_close() == AVDK_ERR_OK) {
+			LOGI("SP channel closed after snapshot\r\n");
+		} else {
+			LOGW("SP channel remains open for close retry\r\n");
+		}
 	}
 	bk_snapshot_sw_jpeg_buf_free(jpeg_buf);
 	bk_snapshot_sw_mutex_unlock();
@@ -692,6 +761,8 @@ avdk_err_t bk_snapshot_sw_prepare(void)
 
 avdk_err_t bk_snapshot_sw_deinit(void)
 {
+	avdk_err_t ret;
+
 	if (!s_sw_snapshot.mutex_inited) {
 		return AVDK_ERR_OK;
 	}
@@ -702,10 +773,12 @@ avdk_err_t bk_snapshot_sw_deinit(void)
 
 	bk_snapshot_sw_work_buf_free();
 
-	if (s_sw_snapshot.sp_channel_open && s_sw_snapshot.sp_owned_by_snapshot &&
-	    s_sw_snapshot.sp_camera != NULL) {
-		(void)bk_isp_camera_channel_close(s_sw_snapshot.sp_camera, ISP_SP_CHN_ID);
-		bk_snapshot_sw_sp_state_clear();
+	if (s_sw_snapshot.sp_channel_open && s_sw_snapshot.sp_owned_by_snapshot) {
+		ret = bk_snapshot_sw_sp_channel_close();
+		if (ret != AVDK_ERR_OK) {
+			rtos_unlock_mutex(&s_sw_snapshot.mutex);
+			return ret;
+		}
 	}
 
 	rtos_unlock_mutex(&s_sw_snapshot.mutex);
