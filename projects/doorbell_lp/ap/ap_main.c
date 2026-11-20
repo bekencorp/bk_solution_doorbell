@@ -46,6 +46,7 @@ int main(void)
     camera_board.mipi.vflip = 0;
     camera_board.isp.mp_enable = true;
     camera_board.isp.mp_flexa = true;
+    camera_board.isp.mp_buf_hsram = true;
     camera_board.isp.mp_width = 1920;
     camera_board.isp.mp_height = 1080;
     camera_board.isp.mp_format = BK_PIXEL_FORMAT_NV12;
@@ -72,6 +73,7 @@ int main(void)
     gpu_board.flexa.scale = false;
     gpu_board.flexa.tess_width = 0;
     gpu_board.flexa.tess_height = 0;
+    gpu_board.flexa.internal_buf_hsram = true;
 
 
     bk_frame_buffer_init();
