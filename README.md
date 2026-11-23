@@ -30,6 +30,7 @@ This solution uses a "maintenance branch + release tag" version management appro
 
 We recommend that customers choose the tag with the highest version number in the `release/v3.1.1.x` series for development and mass production. Only use the `release/v3.1.1` branch when you need to try out the latest features or participate in development.
 
+<!-- readme-get-started:code -->
 ## Get the Code
 
 Both the BK7258 Doorbell Solution and the Armino SMP SDK are published simultaneously to GitHub, Gitee, and GitLab. Choose a code source according to your network environment and access permissions.
@@ -68,8 +69,7 @@ git clone --branch release/v3.1.1.8 https://github.com/bekencorp/bk_avdk_smp.git
 git clone --branch release/v3.1.1.8 https://github.com/bekencorp/bk_solution_doorbell.git
 ```
 
-For more details on getting the code, see [Armino SMP Quick Start](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7258/en/v3.1.1/get-started/index.html).
-
+<!-- readme-get-started:env -->
 ## Set Up the Build Environment
 
 Armino SMP supports both local build and Docker build. Choose one of the following ways to set up the build environment according to your development platform.
@@ -90,10 +90,11 @@ Download and install [Armino Bash](https://dl.bekencorp.com/tools/arminosdk/Wind
 
 ### Docker Build
 
-The Docker build image is [`bekencorp/armino-idk`](https://hub.docker.com/r/bekencorp/armino-idk/tags). Please choose an image tag of `1.5` or higher. It supports Windows / Linux / macOS.
+The Docker build image is [bekencorp/armino-idk](https://hub.docker.com/r/bekencorp/armino-idk/tags). Please choose an image tag of `1.5` or higher. It supports Windows / Linux / macOS.
 
-For detailed setup steps, see [Armino SMP Quick Start: Environment deployment and build](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7258/en/v3.1.1/get-started/index.html).
+For detailed setup steps, see [Environment Deployment and Compilation](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7258/en/v3.1.1/get-started/index.html#smp-get-started-env).
 
+<!-- readme-get-started:build -->
 ## Build the Project
 
 Taking the `doorbell` project as an example (located at `projects/doorbell`), build locally after pointing `SDK_DIR` to the Armino SMP SDK:
@@ -119,28 +120,25 @@ projects/doorbell/build/bk7258/doorbell/package/all-app.bin
 
 For other projects, replace the path in the commands with the corresponding `projects/<project_name>`.
 
+<!-- readme-get-started:flash -->
 ## Flash the Firmware
 
 You can flash the firmware using any of the following methods:
 
-- Download and use the [BKFIL local flashing tool](https://dl.bekencorp.com/tools/flash/)
+- Download and use the [BKFIL local flashing tool](https://dl.bekencorp.com/tools/bkfil/v4)
 - Use the [BKFIL web flashing tool](https://connect.aclsemi.com/)
 
 When flashing, select the `all-app.bin` firmware file generated in the previous section.
 
-For the detailed flashing process, see [Armino SMP Quick Start](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7258/en/v3.1.1/get-started/index.html).
+For the detailed flashing process, see [Burn Code](https://docs.bekencorp.com/arminodoc/bk_avdk_smp/smp_doc/bk7258/en/v3.1.1/get-started/index.html#smp-get-started-flash).
 
 ## Reference Projects
-
-| Project | Main features | Details |
-| --- | --- | --- |
-| [doorbell](../projects/doorbell/) | H.264 network streaming, LCD display, two-way intercom, BLE provisioning. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/en/v3.1.1/projects/doorbell/index.html) |
-| [doorviewer](../projects/doorviewer/) | MJPEG network streaming and LCD display, with better compatibility. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/en/v3.1.1/projects/doorviewer/index.html) |
-| [doorbell_lp](../projects/doorbell_lp/) | Adds AP power-off low-power keep-alive on top of doorbell. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/en/v3.1.1/projects/doorbell_lp/index.html) |
-| [doorbell_4M](../projects/doorbell_4M/) | MJPEG streaming and LCD display; audio supports onboard Speaker and UAC. | [Detailed and usage documentation (online)](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/en/v3.1.1/projects/doorbell_4M/index.html) |
-
-For the applicable scenarios and differences of each project, see the [example projects](https://docs.bekencorp.com/arminodoc/bk_doorbell/bk7258/en/v3.1.1/projects/index.html) page in the online documentation.
-
+The following reference projects are listed; click a name for details.<!-- readme-projects:begin -->
+- [doorbell](/projects/doorbell/)
+- [doorbell_4M](/projects/doorbell_4M/)
+- [doorbell_lp](/projects/doorbell_lp/)
+- [doorviewer](/projects/doorviewer/)
+<!-- readme-projects:end -->
 ## Beken Resources
 
 - [Beken official website](https://www.bekencorp.com/)
