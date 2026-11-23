@@ -52,7 +52,11 @@
 
 #define FB_LIST_MAX_COUNT (3)
 #define MJPEG_MAX_FRAME_COUNT     (4)
+#if defined(CONFIG_PSRAM_CAPACITY) && (CONFIG_PSRAM_CAPACITY <= 0x00400000)
+#define H264_MAX_FRAME_COUNT      (4)
+#else
 #define H264_MAX_FRAME_COUNT      (6)
+#endif
 #define YUV_MAX_FRAME_COUNT       (3)
 
 
